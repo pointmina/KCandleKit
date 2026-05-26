@@ -23,10 +23,17 @@ sealed interface ChartUiState {
     data class Error(val message: String) : ChartUiState
 }
 
-enum class Interval(val label: String, val path: String, val count: Int) {
-    DAY("일봉",  "days",   200),
-    WEEK("주봉", "weeks",  100),
-    MONTH("월봉","months",  60),
+/**
+ * @param minuteUnit null이면 일/주/월봉, 숫자면 분봉 단위 (5, 10, 30, 60)
+ */
+enum class Interval(val label: String, val path: String, val minuteUnit: Int?, val count: Int) {
+    MINUTE_5 ("5분",  "minutes",  5,  200),
+    MINUTE_10("10분", "minutes", 10,  200),
+    MINUTE_30("30분", "minutes", 30,  200),
+    MINUTE_60("60분", "minutes", 60,  200),
+    DAY      ("일봉", "days",    null, 200),
+    WEEK     ("주봉", "weeks",   null, 100),
+    MONTH    ("월봉", "months",  null,  60),
 }
 
 data class Market(val code: String, val label: String)
@@ -74,11 +81,20 @@ class ChartViewModel : ViewModel() {
         viewModelScope.launch {
             _uiState.value = ChartUiState.Loading
             runCatching {
-                UpbitApi.service.getCandles(
-                    interval = interval.path,
-                    market   = market.code,
-                    count    = interval.count,
-                )
+                // 분봉은 /candles/minutes/{unit}, 나머지는 /candles/{days|weeks|months}
+                if (interval.minuteUnit != null) {
+                    UpbitApi.service.getMinuteCandles(
+                        unit   = interval.minuteUnit,
+                        market = market.code,
+                        count  = interval.count,
+                    )
+                } else {
+                    UpbitApi.service.getCandles(
+                        interval = interval.path,
+                        market   = market.code,
+                        count    = interval.count,
+                    )
+                }
             }.onSuccess { response ->
                 // 업비트는 최신→과거 순 반환 — 차트는 과거→최신 순 필요
                 val candles  = response.reversed().map { it.toCandle() }

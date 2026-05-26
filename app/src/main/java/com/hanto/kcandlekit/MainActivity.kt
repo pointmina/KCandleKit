@@ -73,21 +73,6 @@ fun ChartScreen(vm: ChartViewModel = viewModel()) {
                         color = Color.White,
                     )
                 },
-                actions = {
-                    // 봉 종류 선택 (일/주/월)
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        modifier = Modifier.padding(end = 8.dp),
-                    ) {
-                        Interval.entries.forEach { interval ->
-                            IntervalChip(
-                                label    = interval.label,
-                                selected = selectedInterval == interval,
-                                onClick  = { vm.selectInterval(interval) },
-                            )
-                        }
-                    }
-                },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = SURFACE),
             )
         },
@@ -111,6 +96,23 @@ fun ChartScreen(vm: ChartViewModel = viewModel()) {
                         label    = market.label,
                         selected = selectedMarket == market,
                         onClick  = { vm.selectMarket(market) },
+                    )
+                }
+            }
+
+            // 봉 종류 선택 칩 행 (5분~월봉, 가로 스크롤)
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF0F1217)),
+            ) {
+                items(Interval.entries) { interval ->
+                    IntervalChip(
+                        label    = interval.label,
+                        selected = selectedInterval == interval,
+                        onClick  = { vm.selectInterval(interval) },
                     )
                 }
             }

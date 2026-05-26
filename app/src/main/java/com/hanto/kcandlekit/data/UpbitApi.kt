@@ -9,12 +9,23 @@ import retrofit2.http.Query
 
 interface UpbitApiService {
     /**
-     * 캔들 조회. interval = "days" | "weeks" | "months"
+     * 일/주/월봉. interval = "days" | "weeks" | "months"
      * 결과는 최신 순(내림차순) — 호출 측에서 reversed() 처리.
      */
     @GET("candles/{interval}")
     suspend fun getCandles(
         @Path("interval") interval: String,
+        @Query("market") market: String,
+        @Query("count") count: Int,
+    ): List<UpbitCandle>
+
+    /**
+     * 분봉. unit = 1 | 3 | 5 | 10 | 15 | 30 | 60 | 240
+     * 결과는 최신 순(내림차순) — 호출 측에서 reversed() 처리.
+     */
+    @GET("candles/minutes/{unit}")
+    suspend fun getMinuteCandles(
+        @Path("unit") unit: Int,
         @Query("market") market: String,
         @Query("count") count: Int,
     ): List<UpbitCandle>

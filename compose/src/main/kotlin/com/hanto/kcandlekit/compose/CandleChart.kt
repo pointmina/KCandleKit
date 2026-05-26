@@ -1,5 +1,6 @@
 package com.hanto.kcandlekit.compose
 
+import android.annotation.SuppressLint
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -54,8 +55,10 @@ private val PRICE_LABEL_WIDTH = 60.dp
 private val TIME_AXIS_HEIGHT  = 20.dp
 
 // ── 날짜 포맷터 (UI 스레드 단일 사용 — 스레드 안전 불요) ──────────────────────────
-private val DATE_FMT       = SimpleDateFormat("yyyy.MM.dd", Locale.getDefault())
-private val SHORT_DATE_FMT = SimpleDateFormat("MM/dd",      Locale.getDefault())
+private val DATE_FMT       = SimpleDateFormat("yyyy.MM.dd",       Locale.getDefault())
+private val DATETIME_FMT   = SimpleDateFormat("yyyy.MM.dd HH:mm", Locale.getDefault())
+private val SHORT_DATE_FMT = SimpleDateFormat("MM/dd",             Locale.getDefault())
+private val TIME_FMT       = SimpleDateFormat("HH:mm",             Locale.getDefault())
 
 // ── 삼각형 마커 경로 ──────────────────────────────────────────────────────────
 
@@ -89,8 +92,10 @@ private fun Long.toVolumeLabel(): String = when {
     else               -> this.toString()
 }
 
-private fun Long.toDateLabel()      = DATE_FMT.format(Date(this))!!
-private fun Long.toShortDateLabel() = SHORT_DATE_FMT.format(Date(this))!!
+private fun Long.toDateLabel()      = DATE_FMT.format(Date(this))
+private fun Long.toDateTimeLabel()  = DATETIME_FMT.format(Date(this))
+private fun Long.toShortDateLabel() = SHORT_DATE_FMT.format(Date(this))
+private fun Long.toTimeLabel()      = TIME_FMT.format(Date(this))
 
 // ── 패턴 레이블 ───────────────────────────────────────────────────────────────
 
@@ -258,6 +263,12 @@ fun CandleChart(
         val lastIdx        = (firstIdx + (chartWidth / candleWidthPx).toInt() + 2)
             .coerceIn(firstIdx, candles.lastIndex)
         val visibleCandles = candles.subList(firstIdx, lastIdx + 1)
+
+        // 캔들 간격으로 분봉/일봉 자동 판별 — 시간축 포맷 & OHLCV 날짜 포맷 결정
+        val avgCandleMs = if (lastIdx > firstIdx)
+            (candles[lastIdx].timestamp - candles[firstIdx].timestamp) / (lastIdx - firstIdx).toLong()
+        else Long.MAX_VALUE
+        val isIntraday = avgCandleMs < 24 * 60 * 60 * 1_000L  // 1일 미만 간격 = 분봉/시간봉
 
         // ── ③ 가격 스케일 ────────────────────────────────────────────────────
         val rawMin      = visibleCandles.minOf { it.low }
@@ -461,7 +472,8 @@ fun CandleChart(
 
                 // OHLCV 인포바 (상단 좌측 고정)
                 val info = buildString {
-                    append(candle.timestamp.toDateLabel())
+                    // 분봉이면 날짜+시간, 일봉 이상이면 날짜만
+                    append(if (isIntraday) candle.timestamp.toDateTimeLabel() else candle.timestamp.toDateLabel())
                     append("  O ${candle.open.toLabel()}")
                     append("  H ${candle.high.toLabel()}")
                     append("  L ${candle.low.toLabel()}")
@@ -545,7 +557,9 @@ fun CandleChart(
             for (index in firstIdx..lastIdx step labelInterval) {
                 val x = offsetX + (index + 0.5f) * candleWidthPx
                 if (x < 0f || x > chartWidth) continue
-                val label    = candles[index].timestamp.toShortDateLabel()
+                // 분봉이면 HH:mm, 일봉 이상이면 MM/dd
+                val label    = if (isIntraday) candles[index].timestamp.toTimeLabel()
+                               else candles[index].timestamp.toShortDateLabel()
                 val measured = textMeasurer.measure(label, timeAxisStyle)
                 val labelX   = (x - measured.size.width / 2f)
                     .coerceIn(0f, chartWidth - measured.size.width.toFloat())
