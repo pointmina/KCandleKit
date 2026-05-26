@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.hanto.kcandlekit.compose.CandleChart
 import com.hanto.kcandlekit.core.Candle
+import com.hanto.kcandlekit.core.PatternDetector
 import com.hanto.kcandlekit.ui.theme.KCandleKitTheme
 import kotlin.random.Random
 
@@ -24,10 +25,12 @@ class MainActivity : ComponentActivity() {
         setContent {
             KCandleKitTheme {
                 val sampleCandles = remember { generateSampleCandles(count = 120) }
+                val patterns = remember(sampleCandles) { PatternDetector.detect(sampleCandles) }
 
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                     CandleChart(
                         candles = sampleCandles,
+                        patterns = patterns,
                         modifier = Modifier
                             .padding(innerPadding)
                             .fillMaxWidth()

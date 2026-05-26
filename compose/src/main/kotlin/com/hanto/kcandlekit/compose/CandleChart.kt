@@ -12,10 +12,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import com.hanto.kcandlekit.core.Candle
 import com.hanto.kcandlekit.core.PatternResult
+import com.hanto.kcandlekit.core.Signal
 import com.hanto.kcandlekit.core.isBullish
 
 // 줌 범위: 6px(많은 캔들) ~ 120px(소수 캔들)
@@ -28,6 +31,22 @@ private const val PRICE_PADDING_RATIO = 0.05f
 
 // 거래량 영역이 차트 전체 높이의 25%를 차지
 private const val VOLUME_AREA_RATIO = 0.25f
+
+// tip이 꼭짓점, 아래로 퍼지는 상향 삼각형 ▲
+private fun upTriangle(cx: Float, tipY: Float, size: Float) = Path().apply {
+    moveTo(cx, tipY)
+    lineTo(cx - size, tipY + size)
+    lineTo(cx + size, tipY + size)
+    close()
+}
+
+// tip이 꼭짓점, 위로 퍼지는 하향 삼각형 ▼
+private fun downTriangle(cx: Float, tipY: Float, size: Float) = Path().apply {
+    moveTo(cx, tipY)
+    lineTo(cx - size, tipY - size)
+    lineTo(cx + size, tipY - size)
+    close()
+}
 
 @Composable
 fun CandleChart(
@@ -115,6 +134,46 @@ fun CandleChart(
                 topLeft = Offset(centerX - halfBodyWidth, bodyTop),
                 size = Size(halfBodyWidth * 2f, (bodyBottom - bodyTop).coerceAtLeast(1f))
             )
+        }
+
+        // 패턴 마커 오버레이
+        if (config.showPatternMarkers && patterns.isNotEmpty()) {
+            val markerSize = (candleWidthPx * 0.35f).coerceAtLeast(4f)
+            val markerGap = candleWidthPx * 0.25f
+
+            for (patternResult in patterns) {
+                val idx = patternResult.index
+                if (idx < firstIdx || idx > lastIdx) continue
+                val candle = candles[idx]
+                val centerX = offsetX + (idx + 0.5f) * candleWidthPx
+
+                when (patternResult.signal) {
+                    Signal.BULLISH -> {
+                        // 저가 아래 ▲ — 상승 반전 기대
+                        val tipY = priceToY(candle.low) + markerGap
+                        drawPath(
+                            path = upTriangle(centerX, tipY, markerSize),
+                            color = config.bullishColor
+                        )
+                    }
+                    Signal.BEARISH -> {
+                        // 고가 위 ▼ — 하락 전환 경고
+                        val tipY = priceToY(candle.high) - markerGap
+                        drawPath(
+                            path = downTriangle(centerX, tipY, markerSize),
+                            color = config.bearishColor
+                        )
+                    }
+                    Signal.NEUTRAL -> {
+                        // 저가 아래 ● — 도지, 방향 미결
+                        drawCircle(
+                            color = Color.Gray,
+                            radius = markerSize * 0.5f,
+                            center = Offset(centerX, priceToY(candle.low) + markerGap + markerSize * 0.5f)
+                        )
+                    }
+                }
+            }
         }
 
         // 거래량 바
