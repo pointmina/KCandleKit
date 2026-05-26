@@ -4,19 +4,41 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.runtime.remember
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.hanto.kcandlekit.compose.CandleChart
-import com.hanto.kcandlekit.core.Candle
-import com.hanto.kcandlekit.core.PatternDetector
 import com.hanto.kcandlekit.ui.theme.KCandleKitTheme
-import kotlin.random.Random
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -24,70 +46,160 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             KCandleKitTheme {
-                val sampleCandles = remember { generateSampleCandles(count = 120) }
-                val patterns = remember(sampleCandles) { PatternDetector.detect(sampleCandles) }
+                ChartScreen()
+            }
+        }
+    }
+}
 
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    CandleChart(
-                        candles = sampleCandles,
-                        patterns = patterns,
-                        modifier = Modifier
-                            .padding(innerPadding)
-                            .fillMaxSize()
+private val BG = Color(0xFF131722)       // TradingView 다크 배경
+private val SURFACE = Color(0xFF1E2130)  // 컨트롤 영역
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ChartScreen(vm: ChartViewModel = viewModel()) {
+    val uiState        by vm.uiState.collectAsState()
+    val selectedMarket by vm.selectedMarket.collectAsState()
+    val selectedInterval by vm.selectedInterval.collectAsState()
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        text = "${selectedMarket.label} / KRW",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp,
+                        color = Color.White,
                     )
+                },
+                actions = {
+                    // 봉 종류 선택 (일/주/월)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier.padding(end = 8.dp),
+                    ) {
+                        Interval.entries.forEach { interval ->
+                            IntervalChip(
+                                label    = interval.label,
+                                selected = selectedInterval == interval,
+                                onClick  = { vm.selectInterval(interval) },
+                            )
+                        }
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = SURFACE),
+            )
+        },
+        containerColor = BG,
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .padding(innerPadding)
+                .fillMaxSize(),
+        ) {
+            // 코인 선택 칩 행
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(SURFACE),
+            ) {
+                items(MARKETS) { market ->
+                    MarketChip(
+                        label    = market.label,
+                        selected = selectedMarket == market,
+                        onClick  = { vm.selectMarket(market) },
+                    )
+                }
+            }
+
+            // 차트 / 로딩 / 에러
+            Box(modifier = Modifier.fillMaxSize()) {
+                when (val state = uiState) {
+                    is ChartUiState.Loading -> {
+                        CircularProgressIndicator(
+                            modifier = Modifier.align(Alignment.Center),
+                            color = Color(0xFF26A69A),
+                        )
+                    }
+
+                    is ChartUiState.Error -> {
+                        Column(
+                            modifier = Modifier.align(Alignment.Center),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Text(
+                                text  = "데이터를 불러오지 못했어요",
+                                color = Color(0xFFEF5350),
+                                fontSize = 14.sp,
+                            )
+                            Text(
+                                text     = state.message,
+                                color    = Color(0xFF787B86),
+                                fontSize = 11.sp,
+                                modifier = Modifier.padding(top = 4.dp, bottom = 16.dp),
+                            )
+                            Button(onClick = { vm.reload() }) {
+                                Text("다시 시도")
+                            }
+                        }
+                    }
+
+                    is ChartUiState.Success -> {
+                        CandleChart(
+                            candles  = state.candles,
+                            patterns = state.patterns,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
                 }
             }
         }
     }
 }
 
-private fun generateSampleCandles(count: Int): List<Candle> {
-    val random = Random(seed = 42)
-    val candles = mutableListOf<Candle>()
-    var price = 50_000f
-    val dayMs = 24 * 60 * 60 * 1_000L
-    val baseTime = System.currentTimeMillis() - count * dayMs
+// ── 컴포넌트 ──────────────────────────────────────────────────────────────────
 
-    repeat(count) { i ->
-        val rawChange = (random.nextFloat() - 0.48f) * price * 0.03f
+@Composable
+private fun MarketChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    FilterChip(
+        selected = selected,
+        onClick  = onClick,
+        label    = { Text(label, fontSize = 12.sp) },
+        colors   = FilterChipDefaults.filterChipColors(
+            selectedContainerColor    = Color(0xFF26A69A),
+            selectedLabelColor        = Color.White,
+            containerColor            = Color(0xFF2A2E39),
+            labelColor                = Color(0xFFB2B5BE),
+        ),
+        border = FilterChipDefaults.filterChipBorder(
+            enabled              = true,
+            selected             = selected,
+            selectedBorderColor  = Color.Transparent,
+            borderColor          = Color(0xFF363A45),
+        ),
+    )
+}
 
-        // 캔들 종류 결정
-        val isDoji      = random.nextFloat() < 0.05f   //  5%: 도지 (open ≈ close, 심지 길게)
-        val hasLongWick = !isDoji && random.nextFloat() < 0.15f  // 15%: 긴꼬리
-        // 나머지 70%: 일반 캔들
-
-        val change = when {
-            isDoji -> rawChange * 0.04f  // 몸통 거의 0 → body/range 가 10% 미만 → DOJI 검출
-            kotlin.math.abs(rawChange) < price * 0.005f ->
-                price * 0.005f * if (rawChange >= 0f) 1f else -1f  // 일반/긴꼬리 최솟값 보장
-            else -> rawChange
-        }
-
-        val open = price
-        val close = (price + change).coerceAtLeast(1f)
-        val body = kotlin.math.abs(close - open)
-        val longWickIsUpper = hasLongWick && random.nextBoolean()
-
-        val upperWick = when {
-            isDoji      -> price * (random.nextFloat() * 0.008f + 0.004f)  // 가격 기준 심지
-            longWickIsUpper -> body * (random.nextFloat() * 1.5f + 2.5f)
-            else        -> body * random.nextFloat() * 0.08f
-        }
-        val lowerWick = when {
-            isDoji               -> price * (random.nextFloat() * 0.008f + 0.004f)
-            hasLongWick && !longWickIsUpper -> body * (random.nextFloat() * 1.5f + 2.5f)
-            else                 -> body * random.nextFloat() * 0.08f
-        }
-
-        val high = maxOf(open, close) + upperWick
-        val low = (minOf(open, close) - lowerWick).coerceAtLeast(0.1f)
-        val volume = (500_000 + random.nextLong(until = 4_500_000L)).coerceAtLeast(1L)
-
-        candles += Candle(
-            timestamp = baseTime + i * dayMs,
-            open = open, high = high, low = low, close = close, volume = volume
-        )
-        price = close
-    }
-    return candles
+@Composable
+private fun IntervalChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    FilterChip(
+        selected = selected,
+        onClick  = onClick,
+        label    = { Text(label, fontSize = 11.sp) },
+        colors   = FilterChipDefaults.filterChipColors(
+            selectedContainerColor    = Color(0xFF2962FF),
+            selectedLabelColor        = Color.White,
+            containerColor            = Color.Transparent,
+            labelColor                = Color(0xFFB2B5BE),
+        ),
+        border = FilterChipDefaults.filterChipBorder(
+            enabled              = true,
+            selected             = selected,
+            selectedBorderColor  = Color.Transparent,
+            borderColor          = Color(0xFF363A45),
+        ),
+    )
 }
