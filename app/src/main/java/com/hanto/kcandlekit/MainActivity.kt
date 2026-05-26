@@ -49,25 +49,35 @@ private fun generateSampleCandles(count: Int): List<Candle> {
     val baseTime = System.currentTimeMillis() - count * dayMs
 
     repeat(count) { i ->
-        // 몸통: ±3% 변동 / 최솟값 0.5% 보장 → 심지 대비 몸통이 너무 작으면 모든 캔들이 DOJI로 검출됨
         val rawChange = (random.nextFloat() - 0.48f) * price * 0.03f
-        val change = if (kotlin.math.abs(rawChange) < price * 0.005f)
-            price * 0.005f * if (rawChange >= 0f) 1f else -1f
-        else rawChange
+
+        // 캔들 종류 결정
+        val isDoji      = random.nextFloat() < 0.05f   //  5%: 도지 (open ≈ close, 심지 길게)
+        val hasLongWick = !isDoji && random.nextFloat() < 0.15f  // 15%: 긴꼬리
+        // 나머지 70%: 일반 캔들
+
+        val change = when {
+            isDoji -> rawChange * 0.04f  // 몸통 거의 0 → body/range 가 10% 미만 → DOJI 검출
+            kotlin.math.abs(rawChange) < price * 0.005f ->
+                price * 0.005f * if (rawChange >= 0f) 1f else -1f  // 일반/긴꼬리 최솟값 보장
+            else -> rawChange
+        }
 
         val open = price
         val close = (price + change).coerceAtLeast(1f)
         val body = kotlin.math.abs(close - open)
-
-        // 75% 일반 캔들: 심지 ≤ 몸통의 8% (패턴 없음)
-        // 25% 긴꼬리 캔들: 한쪽 심지가 몸통의 2.5~4배 (HAMMER / SHOOTING_STAR 등)
-        val hasLongWick = random.nextFloat() < 0.25f
         val longWickIsUpper = hasLongWick && random.nextBoolean()
 
-        val upperWick = if (longWickIsUpper) body * (random.nextFloat() * 1.5f + 2.5f)
-                        else body * random.nextFloat() * 0.08f
-        val lowerWick = if (hasLongWick && !longWickIsUpper) body * (random.nextFloat() * 1.5f + 2.5f)
-                        else body * random.nextFloat() * 0.08f
+        val upperWick = when {
+            isDoji      -> price * (random.nextFloat() * 0.008f + 0.004f)  // 가격 기준 심지
+            longWickIsUpper -> body * (random.nextFloat() * 1.5f + 2.5f)
+            else        -> body * random.nextFloat() * 0.08f
+        }
+        val lowerWick = when {
+            isDoji               -> price * (random.nextFloat() * 0.008f + 0.004f)
+            hasLongWick && !longWickIsUpper -> body * (random.nextFloat() * 1.5f + 2.5f)
+            else                 -> body * random.nextFloat() * 0.08f
+        }
 
         val high = maxOf(open, close) + upperWick
         val low = (minOf(open, close) - lowerWick).coerceAtLeast(0.1f)
