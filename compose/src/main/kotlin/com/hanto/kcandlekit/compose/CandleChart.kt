@@ -76,9 +76,11 @@ private fun downTriangle(cx: Float, tipY: Float, size: Float) = Path().apply {
 // ── 레이블 포맷터 ─────────────────────────────────────────────────────────────
 
 private fun Float.toLabel(): String = when {
-    this >= 10_000f -> "%.0f".format(this)
-    this >= 100f    -> "%.1f".format(this)
-    else            -> "%.2f".format(this)
+    this >= 1_000_000_000f -> "${"%.2f".format(this / 1_000_000_000f)}B"
+    this >= 1_000_000f     -> "${"%.2f".format(this / 1_000_000f)}M"
+    this >= 1_000f         -> "${"%.1f".format(this / 1_000f)}K"
+    this >= 100f           -> "%.1f".format(this)
+    else                   -> "%.2f".format(this)
 }
 
 private fun Long.toVolumeLabel(): String = when {
