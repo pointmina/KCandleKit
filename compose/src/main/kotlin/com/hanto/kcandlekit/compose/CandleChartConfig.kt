@@ -3,9 +3,23 @@ package com.hanto.kcandlekit.compose
 import androidx.compose.ui.graphics.Color
 
 data class CandleChartConfig(
-    val bullishColor: Color = Color(0xFF26A69A),   // 상승봉: 틸 그린 (국제 금융 차트 표준)
-    val bearishColor: Color = Color(0xFFEF5350),   // 하락봉: 레드 (국제 금융 차트 표준)
+    // 캔들 색상
+    val bullishColor: Color = Color(0xFF26A69A),
+    val bearishColor: Color = Color(0xFFEF5350),
+
+    // 배경 / 그리드
+    val backgroundColor: Color = Color(0xFF131722),  // TradingView 다크 스타일
+    val gridColor: Color = Color(0xFF1E2130),
+    val priceTextColor: Color = Color(0xFF787B86),
+    val showGrid: Boolean = true,
+    val gridLineCount: Int = 4,
+
+    // 패턴
     val showPatternMarkers: Boolean = true,
+    val showPatternLabels: Boolean = true,
+
+    // 거래량
     val showVolume: Boolean = true,
-    val candleWidthRatio: Float = 0.6f             // 전체 슬롯 너비 대비 바디 너비 비율
+
+    val candleWidthRatio: Float = 0.6f,
 )

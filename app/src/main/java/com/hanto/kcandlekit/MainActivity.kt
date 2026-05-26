@@ -33,8 +33,7 @@ class MainActivity : ComponentActivity() {
                         patterns = patterns,
                         modifier = Modifier
                             .padding(innerPadding)
-                            .fillMaxWidth()
-                            .height(400.dp)
+                            .fillMaxSize()
                     )
                 }
             }
@@ -43,27 +42,40 @@ class MainActivity : ComponentActivity() {
 }
 
 private fun generateSampleCandles(count: Int): List<Candle> {
-    val random = Random(seed = 42) // 재현 가능한 시드
+    val random = Random(seed = 42)
     val candles = mutableListOf<Candle>()
-    var price = 50_000f                // 시작가 (원화 기준 5만원 주식 가정)
+    var price = 50_000f
     val dayMs = 24 * 60 * 60 * 1_000L
     val baseTime = System.currentTimeMillis() - count * dayMs
 
     repeat(count) { i ->
-        val change = (random.nextFloat() - 0.48f) * price * 0.03f // ±3% 변동, 약간 상승 편향
+        // 몸통: ±3% 변동 / 최솟값 0.5% 보장 → 심지 대비 몸통이 너무 작으면 모든 캔들이 DOJI로 검출됨
+        val rawChange = (random.nextFloat() - 0.48f) * price * 0.03f
+        val change = if (kotlin.math.abs(rawChange) < price * 0.005f)
+            price * 0.005f * if (rawChange >= 0f) 1f else -1f
+        else rawChange
+
         val open = price
         val close = (price + change).coerceAtLeast(1f)
-        val high = maxOf(open, close) + random.nextFloat() * price * 0.01f
-        val low = minOf(open, close) - random.nextFloat() * price * 0.01f
+        val body = kotlin.math.abs(close - open)
+
+        // 75% 일반 캔들: 심지 ≤ 몸통의 8% (패턴 없음)
+        // 25% 긴꼬리 캔들: 한쪽 심지가 몸통의 2.5~4배 (HAMMER / SHOOTING_STAR 등)
+        val hasLongWick = random.nextFloat() < 0.25f
+        val longWickIsUpper = hasLongWick && random.nextBoolean()
+
+        val upperWick = if (longWickIsUpper) body * (random.nextFloat() * 1.5f + 2.5f)
+                        else body * random.nextFloat() * 0.08f
+        val lowerWick = if (hasLongWick && !longWickIsUpper) body * (random.nextFloat() * 1.5f + 2.5f)
+                        else body * random.nextFloat() * 0.08f
+
+        val high = maxOf(open, close) + upperWick
+        val low = (minOf(open, close) - lowerWick).coerceAtLeast(0.1f)
         val volume = (500_000 + random.nextLong(until = 4_500_000L)).coerceAtLeast(1L)
 
         candles += Candle(
             timestamp = baseTime + i * dayMs,
-            open = open,
-            high = high,
-            low = low.coerceAtLeast(0.1f),
-            close = close,
-            volume = volume
+            open = open, high = high, low = low, close = close, volume = volume
         )
         price = close
     }
