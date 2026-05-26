@@ -24,3 +24,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "KCandleKit"
 include(":app")
+include(":core")
+include(":compose")
