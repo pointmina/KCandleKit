@@ -130,4 +130,126 @@ class PatternDetectorTest {
         val result = patterns.first { it.pattern == CandlePattern.SHOOTING_STAR }
         assertTrue(result.signal == Signal.BEARISH)
     }
+
+    // --- 불리시 엔걸핑 ---
+
+    @Test
+    fun `detects bullish engulfing in downtrend`() {
+        // prev: 음봉 (open=105, close=100, body=5)
+        // curr: 양봉 (open=99, close=106, body=7) — prev 몸통 완전히 감쌈
+        val prev = candle(open = 105f, high = 106f, low = 99f, close = 100f)
+        val curr = candle(open = 99f, high = 107f, low = 98f, close = 106f)
+        val patterns = PatternDetector.detect(downtrendContext() + prev + curr)
+        assertTrue(patterns.any { it.pattern == CandlePattern.BULLISH_ENGULFING })
+    }
+
+    @Test
+    fun `does not detect bullish engulfing in uptrend`() {
+        val prev = candle(open = 105f, high = 106f, low = 99f, close = 100f)
+        val curr = candle(open = 99f, high = 107f, low = 98f, close = 106f)
+        val patterns = PatternDetector.detect(uptrendContext() + prev + curr)
+        assertTrue(patterns.none { it.pattern == CandlePattern.BULLISH_ENGULFING })
+    }
+
+    @Test
+    fun `bullish engulfing has span 2`() {
+        val prev = candle(open = 105f, high = 106f, low = 99f, close = 100f)
+        val curr = candle(open = 99f, high = 107f, low = 98f, close = 106f)
+        val patterns = PatternDetector.detect(downtrendContext() + prev + curr)
+        val result = patterns.first { it.pattern == CandlePattern.BULLISH_ENGULFING }
+        assertTrue(result.span == 2)
+    }
+
+    // --- 베어리시 엔걸핑 ---
+
+    @Test
+    fun `detects bearish engulfing in uptrend`() {
+        // prev: 양봉 (open=100, close=105, body=5)
+        // curr: 음봉 (open=106, close=99, body=7) — prev 몸통 완전히 감쌈
+        val prev = candle(open = 100f, high = 106f, low = 99f, close = 105f)
+        val curr = candle(open = 106f, high = 107f, low = 98f, close = 99f)
+        val patterns = PatternDetector.detect(uptrendContext() + prev + curr)
+        assertTrue(patterns.any { it.pattern == CandlePattern.BEARISH_ENGULFING })
+    }
+
+    @Test
+    fun `bearish engulfing has span 2`() {
+        val prev = candle(open = 100f, high = 106f, low = 99f, close = 105f)
+        val curr = candle(open = 106f, high = 107f, low = 98f, close = 99f)
+        val patterns = PatternDetector.detect(uptrendContext() + prev + curr)
+        val result = patterns.first { it.pattern == CandlePattern.BEARISH_ENGULFING }
+        assertTrue(result.span == 2)
+    }
+
+    // --- 모닝 스타 ---
+
+    @Test
+    fun `detects morning star in downtrend`() {
+        // c0: 큰 음봉 (body=10, range=12)
+        // c1: 작은 별 (body=1)
+        // c2: 큰 양봉 (body=8, close=108 ≥ c0 중간값 105)
+        val c0 = candle(open = 110f, high = 111f, low = 99f, close = 100f)
+        val c1 = candle(open = 99f, high = 101f, low = 97f, close = 100f)
+        val c2 = candle(open = 100f, high = 109f, low = 99f, close = 108f)
+        val patterns = PatternDetector.detect(downtrendContext() + c0 + c1 + c2)
+        assertTrue(patterns.any { it.pattern == CandlePattern.MORNING_STAR })
+    }
+
+    @Test
+    fun `morning star has span 3`() {
+        val c0 = candle(open = 110f, high = 111f, low = 99f, close = 100f)
+        val c1 = candle(open = 99f, high = 101f, low = 97f, close = 100f)
+        val c2 = candle(open = 100f, high = 109f, low = 99f, close = 108f)
+        val patterns = PatternDetector.detect(downtrendContext() + c0 + c1 + c2)
+        val result = patterns.first { it.pattern == CandlePattern.MORNING_STAR }
+        assertTrue(result.span == 3)
+    }
+
+    // --- 이브닝 스타 ---
+
+    @Test
+    fun `detects evening star in uptrend`() {
+        // c0: 큰 양봉 (body=10, range=12)
+        // c1: 작은 별 (body=1)
+        // c2: 큰 음봉 (body=8, close=102 ≤ c0 중간값 105)
+        val c0 = candle(open = 100f, high = 111f, low = 99f, close = 110f)
+        val c1 = candle(open = 111f, high = 113f, low = 109f, close = 110f)
+        val c2 = candle(open = 110f, high = 111f, low = 101f, close = 102f)
+        val patterns = PatternDetector.detect(uptrendContext() + c0 + c1 + c2)
+        assertTrue(patterns.any { it.pattern == CandlePattern.EVENING_STAR })
+    }
+
+    @Test
+    fun `evening star has span 3`() {
+        val c0 = candle(open = 100f, high = 111f, low = 99f, close = 110f)
+        val c1 = candle(open = 111f, high = 113f, low = 109f, close = 110f)
+        val c2 = candle(open = 110f, high = 111f, low = 101f, close = 102f)
+        val patterns = PatternDetector.detect(uptrendContext() + c0 + c1 + c2)
+        val result = patterns.first { it.pattern == CandlePattern.EVENING_STAR }
+        assertTrue(result.span == 3)
+    }
+
+    // --- 쓰리 화이트 솔져스 ---
+
+    @Test
+    fun `detects three white soldiers in downtrend`() {
+        // c0: 양봉 open=100, close=105 (body=5, range=7 → 71%)
+        // c1: 양봉 open=102(c0 몸통 내), close=108 (body=6, range=8 → 75%)
+        // c2: 양봉 open=105(c1 몸통 내), close=112 (body=7, range=9 → 78%)
+        val c0 = candle(open = 100f, high = 106f, low = 99f, close = 105f)
+        val c1 = candle(open = 102f, high = 109f, low = 101f, close = 108f)
+        val c2 = candle(open = 105f, high = 113f, low = 104f, close = 112f)
+        val patterns = PatternDetector.detect(downtrendContext() + c0 + c1 + c2)
+        assertTrue(patterns.any { it.pattern == CandlePattern.THREE_WHITE_SOLDIERS })
+    }
+
+    @Test
+    fun `three white soldiers has span 3`() {
+        val c0 = candle(open = 100f, high = 106f, low = 99f, close = 105f)
+        val c1 = candle(open = 102f, high = 109f, low = 101f, close = 108f)
+        val c2 = candle(open = 105f, high = 113f, low = 104f, close = 112f)
+        val patterns = PatternDetector.detect(downtrendContext() + c0 + c1 + c2)
+        val result = patterns.first { it.pattern == CandlePattern.THREE_WHITE_SOLDIERS }
+        assertTrue(result.span == 3)
+    }
 }

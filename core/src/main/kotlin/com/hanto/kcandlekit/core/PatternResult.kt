@@ -3,7 +3,8 @@ package com.hanto.kcandlekit.core
 data class PatternResult(
     val index: Int,        // 패턴이 감지된 마지막 캔들의 인덱스
     val pattern: CandlePattern,
-    val signal: Signal
+    val signal: Signal,
+    val span: Int = 1      // 패턴이 걸치는 캔들 수 (단일=1, 엔걸핑=2, 스타/쓰리솔져스=3)
 )
 
 enum class CandlePattern {

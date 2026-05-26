@@ -196,12 +196,17 @@ fun CandleChart(
         clipRect(0f, 0f, chartWidth, size.height) {
 
             // 6. 패턴 구간 배경 (캔들보다 먼저)
+            // span을 활용해 복합 패턴(엔걸핑=2, 스타/쓰리솔져스=3)은 전체 캔들 범위를 강조
             if (config.showPatternMarkers) {
                 for (result in patterns) {
                     val idx = result.index
-                    if (idx < firstIdx || idx > lastIdx) continue
-                    val candle = candles[idx]
-                    val centerX = offsetX + (idx + 0.5f) * candleWidthPx
+                    if (idx !in firstIdx..lastIdx) continue
+                    val startIdx = (idx - result.span + 1).coerceAtLeast(0)
+                    val spanCandles = candles.subList(startIdx, idx + 1)
+                    val zoneHigh = spanCandles.maxOf { it.high }
+                    val zoneLow  = spanCandles.minOf { it.low }
+                    val zoneLeft = offsetX + startIdx * candleWidthPx
+                    val zoneRight = offsetX + (idx + 1) * candleWidthPx
                     val zoneColor = when (result.signal) {
                         Signal.BULLISH -> config.bullishColor
                         Signal.BEARISH -> config.bearishColor
@@ -211,8 +216,8 @@ fun CandleChart(
                     val alpha = if (tappedPatternIndex == idx) 0.30f else 0.15f
                     drawRect(
                         color = zoneColor.copy(alpha = alpha),
-                        topLeft = Offset(centerX - candleWidthPx / 2f, priceToY(candle.high)),
-                        size = Size(candleWidthPx, priceToY(candle.low) - priceToY(candle.high))
+                        topLeft = Offset(zoneLeft, priceToY(zoneHigh)),
+                        size = Size(zoneRight - zoneLeft, priceToY(zoneLow) - priceToY(zoneHigh))
                     )
                 }
             }
@@ -303,9 +308,8 @@ fun CandleChart(
                         Signal.NEUTRAL -> "— Neutral"
                     }
                     val line1 = result.pattern.fullLabel()
-                    val line2 = signalText
                     val measured1 = textMeasurer.measure(line1, tapBadgeStyle)
-                    val measured2 = textMeasurer.measure(line2, tapBadgeStyle)
+                    val measured2 = textMeasurer.measure(signalText, tapBadgeStyle)
                     val badgeW = maxOf(measured1.size.width, measured2.size.width).toFloat()
                     val badgeH = (measured1.size.height + measured2.size.height + 6).toFloat()
                     val badgeColor = when (result.signal) {
@@ -325,7 +329,8 @@ fun CandleChart(
                     drawRect(color = badgeColor, topLeft = Offset(badgeX, badgeY), size = Size(badgeW + 12f, badgeH))
                     // 텍스트
                     drawText(textMeasurer, line1, Offset(badgeX + 6f, badgeY + 3f), tapBadgeStyle)
-                    drawText(textMeasurer, line2, Offset(badgeX + 6f, badgeY + 3f + measured1.size.height), tapBadgeStyle)
+                    drawText(textMeasurer,
+                        signalText, Offset(badgeX + 6f, badgeY + 3f + measured1.size.height), tapBadgeStyle)
                 }
             }
 
