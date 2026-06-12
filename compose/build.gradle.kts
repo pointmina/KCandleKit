@@ -58,7 +58,7 @@ mavenPublishing {
     }
 
     publishToMavenCentral(SonatypeHost.CENTRAL_PORTAL)
-    signAllPublications()
+    if (project.hasProperty("signing.keyId")) signAllPublications()
 }
 
 dependencies {
