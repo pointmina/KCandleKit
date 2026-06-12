@@ -35,6 +35,7 @@ sealed interface ChartUiState {
  * @param minuteUnit null이면 일/주/월봉, 숫자면 분봉 단위 (5, 10, 30, 60)
  */
 enum class Interval(val label: String, val path: String, val minuteUnit: Int?, val count: Int) {
+    MINUTE_1 ("1분",  "minutes",  1,  200),
     MINUTE_5 ("5분",  "minutes",  5,  200),
     MINUTE_10("10분", "minutes", 10,  200),
     MINUTE_30("30분", "minutes", 30,  200),
