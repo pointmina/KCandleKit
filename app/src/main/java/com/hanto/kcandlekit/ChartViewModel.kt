@@ -7,10 +7,9 @@ import com.hanto.kcandlekit.core.Candle
 import com.hanto.kcandlekit.core.DrawingLine
 import com.hanto.kcandlekit.core.PatternDetector
 import com.hanto.kcandlekit.core.PatternResult
-import com.hanto.kcandlekit.data.UpbitApi
-import com.hanto.kcandlekit.data.UpbitTickerMessage
-import com.hanto.kcandlekit.data.toCandle
-import com.hanto.kcandlekit.data.upbitTickerFlow
+import com.hanto.kcandlekit.data.CandleRepository
+import com.hanto.kcandlekit.data.TickerRepository
+import com.hanto.kcandlekit.data.TickerUpdate
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -33,18 +32,16 @@ sealed interface ChartUiState {
     data class Error(val message: String) : ChartUiState
 }
 
-/**
- * @param minuteUnit null이면 일/주/월봉, 숫자면 분봉 단위 (5, 10, 30, 60)
- */
-enum class Interval(val label: String, val path: String, val minuteUnit: Int?, val count: Int) {
-    MINUTE_1 ("1분",  "minutes",  1,  200),
-    MINUTE_5 ("5분",  "minutes",  5,  200),
-    MINUTE_10("10분", "minutes", 10,  200),
-    MINUTE_30("30분", "minutes", 30,  200),
-    MINUTE_60("60분", "minutes", 60,  200),
-    DAY      ("일봉", "days",    null, 200),
-    WEEK     ("주봉", "weeks",   null, 100),
-    MONTH    ("월봉", "months",  null,  60),
+/** minuteUnit null이면 일/주/월봉, 숫자면 분봉 단위 */
+enum class Interval(val label: String, val minuteUnit: Int?, val count: Int) {
+    MINUTE_1 ("1분",   1,  200),
+    MINUTE_5 ("5분",   5,  200),
+    MINUTE_10("10분", 10,  200),
+    MINUTE_30("30분", 30,  200),
+    MINUTE_60("60분", 60,  200),
+    DAY      ("일봉", null, 200),
+    WEEK     ("주봉", null, 100),
+    MONTH    ("월봉", null,  60),
 }
 
 data class Market(val code: String, val label: String)
@@ -59,7 +56,10 @@ val MARKETS = listOf(
 
 // ── ViewModel ─────────────────────────────────────────────────────────────────
 
-class ChartViewModel : ViewModel() {
+class ChartViewModel(
+    private val candleRepo: CandleRepository,
+    private val tickerRepo: TickerRepository,
+) : ViewModel() {
 
     private val _uiState = MutableStateFlow<ChartUiState>(ChartUiState.Loading)
     val uiState: StateFlow<ChartUiState> = _uiState.asStateFlow()
@@ -126,22 +126,8 @@ class ChartViewModel : ViewModel() {
         viewModelScope.launch {
             _uiState.value = ChartUiState.Loading
             runCatching {
-                if (interval.minuteUnit != null) {
-                    UpbitApi.service.getMinuteCandles(
-                        unit   = interval.minuteUnit,
-                        market = market.code,
-                        count  = interval.count,
-                    )
-                } else {
-                    UpbitApi.service.getCandles(
-                        interval = interval.path,
-                        market   = market.code,
-                        count    = interval.count,
-                    )
-                }
-            }.onSuccess { response ->
-                // 업비트는 최신→과거 순 반환 — 차트는 과거→최신 순 필요
-                val candles  = response.reversed().map { it.toCandle() }
+                candleRepo.getCandles(market, interval)
+            }.onSuccess { candles ->
                 val patterns = PatternDetector.detect(candles)
                 _uiState.value = ChartUiState.Success(candles, patterns)
 
@@ -166,7 +152,7 @@ class ChartViewModel : ViewModel() {
             var backoffMs = 1_000L
             while (isActive) {
                 try {
-                    upbitTickerFlow(UpbitApi.client, market.code)
+                    tickerRepo.tickerFlow(market)
                         .collect { processTick(it, interval) }
                     backoffMs = 1_000L  // 정상 종료 시 백오프 초기화
                 } catch (e: CancellationException) {
@@ -185,7 +171,7 @@ class ChartViewModel : ViewModel() {
         }
     }
 
-    private fun processTick(tick: UpbitTickerMessage, interval: Interval) {
+    private fun processTick(tick: TickerUpdate, interval: Interval) {
         // 봉 경계를 넘으면 REST 재조회로 깔끔한 데이터 확보
         if (periodStartOf(tick.tradeTimestamp, interval) > currentPeriodStart) {
             viewModelScope.launch(Dispatchers.Main.immediate) { load() }

@@ -72,7 +72,7 @@ private val SURFACE = Color(0xFF1E2130)  // 컨트롤 영역
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ChartScreen(vm: ChartViewModel = viewModel()) {
+fun ChartScreen(vm: ChartViewModel = viewModel(factory = ChartViewModelFactory())) {
     val uiState          by vm.uiState.collectAsState()
     val selectedMarket   by vm.selectedMarket.collectAsState()
     val selectedInterval by vm.selectedInterval.collectAsState()

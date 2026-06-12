@@ -17,6 +17,7 @@ data class CandleChartConfig(
     // 패턴 마커
     val showPatternMarkers: Boolean = true,
     val showPatternLabels: Boolean = false,
+    val showStrongSignalBadge: Boolean = true,
 
     // 거래량
     val showVolume: Boolean = true,

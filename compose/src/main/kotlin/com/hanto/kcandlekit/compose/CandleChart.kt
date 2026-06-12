@@ -37,6 +37,7 @@ import com.hanto.kcandlekit.core.DrawingLine
 import com.hanto.kcandlekit.core.Indicators
 import com.hanto.kcandlekit.core.PatternResult
 import com.hanto.kcandlekit.core.Signal
+import com.hanto.kcandlekit.core.SignalStrength
 import com.hanto.kcandlekit.core.isBullish
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
@@ -44,6 +45,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.sin
 
 // ── 레이아웃 상수 ──────────────────────────────────────────────────────────────
 
@@ -77,6 +80,21 @@ private fun downTriangle(cx: Float, tipY: Float, size: Float) = Path().apply {
     lineTo(cx - size, tipY - size * 1.2f)
     lineTo(cx + size, tipY - size * 1.2f)
     close()
+}
+
+// 5각 별 경로: STRONG 신호 마커용
+private fun starPath(cx: Float, cy: Float, outerR: Float): Path {
+    val innerR = outerR * 0.4f
+    val path = Path()
+    repeat(10) { i ->
+        val angle = (Math.PI / 5.0 * i - Math.PI / 2.0)
+        val r = if (i % 2 == 0) outerR else innerR
+        val x = cx + (r * cos(angle)).toFloat()
+        val y = cy + (r * sin(angle)).toFloat()
+        if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+    }
+    path.close()
+    return path
 }
 
 // ── 레이블 포맷터 ─────────────────────────────────────────────────────────────
@@ -113,6 +131,7 @@ private fun CandlePattern.shortLabel() = when (this) {
     CandlePattern.MORNING_STAR         -> "M.STAR"
     CandlePattern.EVENING_STAR         -> "E.STAR"
     CandlePattern.THREE_WHITE_SOLDIERS -> "3WS"
+    CandlePattern.THREE_BLACK_CROWS    -> "3BC"
 }
 
 private fun CandlePattern.fullLabel() = when (this) {
@@ -126,6 +145,7 @@ private fun CandlePattern.fullLabel() = when (this) {
     CandlePattern.MORNING_STAR         -> "Morning Star"
     CandlePattern.EVENING_STAR         -> "Evening Star"
     CandlePattern.THREE_WHITE_SOLDIERS -> "Three White Soldiers"
+    CandlePattern.THREE_BLACK_CROWS    -> "Three Black Crows"
 }
 
 // ── DrawScope 유틸 ────────────────────────────────────────────────────────────
@@ -165,6 +185,9 @@ fun CandleChart(
     }
     val tapBadgeStyle = remember {
         TextStyle(fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.Bold)
+    }
+    val strongBadgeStyle = remember {
+        TextStyle(fontSize = 9.sp, color = Color.White, fontWeight = FontWeight.Bold)
     }
     val timeAxisStyle = remember(config.timeAxisTextColor) {
         TextStyle(fontSize = 9.sp, color = config.timeAxisTextColor)
@@ -497,26 +520,64 @@ fun CandleChart(
                     when (result.signal) {
                         Signal.BULLISH -> {
                             val tipY = priceToY(candle.low) + markerGap
-                            val path = upTriangle(centerX, tipY, markerSize)
-                            drawPath(path, color = config.bullishColor)
-                            drawPath(path, color = Color.White.copy(alpha = 0.7f), style = Stroke(width = 1.2f))
-                            if (config.showPatternLabels) {
-                                val tx = centerX - measured.size.width / 2f
-                                val ty = tipY + markerSize * 1.2f + 3f
-                                drawLabelBadge(tx, ty, measured.size.width.toFloat(), measured.size.height.toFloat(), config.bullishColor)
-                                drawText(textMeasurer, shortLabel, Offset(tx, ty), markerLabelStyle)
+                            if (result.strength == SignalStrength.STRONG) {
+                                val starCy = tipY + markerSize * 0.9f
+                                val star = starPath(centerX, starCy, markerSize * 0.9f)
+                                drawPath(star, color = config.bullishColor)
+                                drawPath(star, color = Color.White.copy(alpha = 0.8f), style = Stroke(width = 1.5f))
+                                if (config.showStrongSignalBadge) {
+                                    val buyLabel = "BUY"
+                                    val bm = textMeasurer.measure(buyLabel, strongBadgeStyle)
+                                    val bx = centerX - bm.size.width / 2f - 4f
+                                    val by = starCy + markerSize + 4f
+                                    drawRect(
+                                        color = config.bullishColor,
+                                        topLeft = Offset(bx, by),
+                                        size = Size(bm.size.width.toFloat() + 8f, bm.size.height.toFloat() + 4f),
+                                    )
+                                    drawText(textMeasurer, buyLabel, Offset(bx + 4f, by + 2f), strongBadgeStyle)
+                                }
+                            } else {
+                                val path = upTriangle(centerX, tipY, markerSize)
+                                drawPath(path, color = config.bullishColor)
+                                drawPath(path, color = Color.White.copy(alpha = 0.7f), style = Stroke(width = 1.2f))
+                                if (config.showPatternLabels) {
+                                    val tx = centerX - measured.size.width / 2f
+                                    val ty = tipY + markerSize * 1.2f + 3f
+                                    drawLabelBadge(tx, ty, measured.size.width.toFloat(), measured.size.height.toFloat(), config.bullishColor)
+                                    drawText(textMeasurer, shortLabel, Offset(tx, ty), markerLabelStyle)
+                                }
                             }
                         }
                         Signal.BEARISH -> {
                             val tipY = priceToY(candle.high) - markerGap
-                            val path = downTriangle(centerX, tipY, markerSize)
-                            drawPath(path, color = config.bearishColor)
-                            drawPath(path, color = Color.White.copy(alpha = 0.7f), style = Stroke(width = 1.2f))
-                            if (config.showPatternLabels) {
-                                val tx = centerX - measured.size.width / 2f
-                                val ty = tipY - markerSize * 1.2f - measured.size.height - 3f
-                                drawLabelBadge(tx, ty, measured.size.width.toFloat(), measured.size.height.toFloat(), config.bearishColor)
-                                drawText(textMeasurer, shortLabel, Offset(tx, ty), markerLabelStyle)
+                            if (result.strength == SignalStrength.STRONG) {
+                                val starCy = tipY - markerSize * 0.9f
+                                val star = starPath(centerX, starCy, markerSize * 0.9f)
+                                drawPath(star, color = config.bearishColor)
+                                drawPath(star, color = Color.White.copy(alpha = 0.8f), style = Stroke(width = 1.5f))
+                                if (config.showStrongSignalBadge) {
+                                    val sellLabel = "SELL"
+                                    val bm = textMeasurer.measure(sellLabel, strongBadgeStyle)
+                                    val bx = centerX - bm.size.width / 2f - 4f
+                                    val by = starCy - markerSize - bm.size.height.toFloat() - 4f
+                                    drawRect(
+                                        color = config.bearishColor,
+                                        topLeft = Offset(bx, by),
+                                        size = Size(bm.size.width.toFloat() + 8f, bm.size.height.toFloat() + 4f),
+                                    )
+                                    drawText(textMeasurer, sellLabel, Offset(bx + 4f, by + 2f), strongBadgeStyle)
+                                }
+                            } else {
+                                val path = downTriangle(centerX, tipY, markerSize)
+                                drawPath(path, color = config.bearishColor)
+                                drawPath(path, color = Color.White.copy(alpha = 0.7f), style = Stroke(width = 1.2f))
+                                if (config.showPatternLabels) {
+                                    val tx = centerX - measured.size.width / 2f
+                                    val ty = tipY - markerSize * 1.2f - measured.size.height - 3f
+                                    drawLabelBadge(tx, ty, measured.size.width.toFloat(), measured.size.height.toFloat(), config.bearishColor)
+                                    drawText(textMeasurer, shortLabel, Offset(tx, ty), markerLabelStyle)
+                                }
                             }
                         }
                         Signal.NEUTRAL -> {
