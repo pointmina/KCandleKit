@@ -1,6 +1,6 @@
 # KCandleKit
 
-A Kotlin-first candlestick chart library for Android, built with Jetpack Compose.  
+A candlestick chart library for Android, built with Jetpack Compose.  
 Plug in any exchange or securities API — the chart and pattern engine are fully decoupled from data sources.
 
 > **Portfolio project** — demonstrates clean architecture (multimodule, repository pattern, Kotlin Coroutines/Flow, Compose Canvas).
