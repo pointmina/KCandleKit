@@ -47,7 +47,7 @@ mavenPublishing {
     publishToMavenCentral(SonatypeHost.CENTRAL_PORTAL)
 
     // 배포 시 GPG 서명 필수 (로컬 테스트는 publishToMavenLocal 사용)
-    signAllPublications()
+    if (project.hasProperty("signing.keyId")) signAllPublications()
 }
 
 dependencies {
