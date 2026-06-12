@@ -1,6 +1,5 @@
 package com.hanto.kcandlekit.compose
 
-import android.annotation.SuppressLint
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -34,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hanto.kcandlekit.core.Candle
 import com.hanto.kcandlekit.core.CandlePattern
+import com.hanto.kcandlekit.core.DrawingLine
 import com.hanto.kcandlekit.core.Indicators
 import com.hanto.kcandlekit.core.PatternResult
 import com.hanto.kcandlekit.core.Signal
@@ -43,6 +43,7 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.abs
 
 // ── 레이아웃 상수 ──────────────────────────────────────────────────────────────
 
@@ -53,6 +54,8 @@ private const val PRICE_PADDING_RATIO  = 0.05f
 private const val VOLUME_AREA_RATIO    = 0.2f
 private val PRICE_LABEL_WIDTH = 60.dp
 private val TIME_AXIS_HEIGHT  = 20.dp
+
+private val DRAWING_LINE_COLOR = Color(0xFFFFC107)  // 앰버
 
 // ── 날짜 포맷터 (UI 스레드 단일 사용 — 스레드 안전 불요) ──────────────────────────
 private val DATE_FMT       = SimpleDateFormat("yyyy.MM.dd",       Locale.getDefault())
@@ -141,6 +144,10 @@ private fun DrawScope.drawLabelBadge(
 fun CandleChart(
     candles: List<Candle>,
     patterns: List<PatternResult> = emptyList(),
+    drawingLines: List<DrawingLine> = emptyList(),
+    activeTool: DrawingTool = DrawingTool.NONE,
+    onDrawingLineAdded: (DrawingLine) -> Unit = {},
+    onDrawingLineRemoved: (DrawingLine) -> Unit = {},
     config: CandleChartConfig = CandleChartConfig(),
     modifier: Modifier = Modifier,
 ) {
@@ -163,11 +170,12 @@ fun CandleChart(
         TextStyle(fontSize = 9.sp, color = config.timeAxisTextColor)
     }
     val crosshairInfoStyle = remember {
-        // OHLCV 인포바 — TradingView 스타일 밝은 회색
         TextStyle(fontSize = 10.sp, color = Color(0xFFD1D4DC))
     }
     val crosshairPriceStyle = remember {
-        // 크로스헤어 가격 배지 — 어두운 배경 위 짙은 텍스트
+        TextStyle(fontSize = 10.sp, color = Color(0xFF131722), fontWeight = FontWeight.Bold)
+    }
+    val drawingBadgeStyle = remember {
         TextStyle(fontSize = 10.sp, color = Color(0xFF131722), fontWeight = FontWeight.Bold)
     }
 
@@ -177,8 +185,18 @@ fun CandleChart(
     var screenWidth        by remember { mutableFloatStateOf(0f) }
     var scrollInitialized  by remember(candles) { mutableStateOf(false) }
     var tappedPatternIndex by remember { mutableStateOf<Int?>(null) }
-    // 크로스헤어가 가리키는 캔들 인덱스 — null이면 비활성
     var crosshairIndex     by remember { mutableStateOf<Int?>(null) }
+
+    // 가격 스케일 스냅 — gesture 콜백에서 price ↔ Y 변환에 사용
+    var chartHeightSnap    by remember { mutableFloatStateOf(0f) }
+    var minPriceSnap       by remember { mutableFloatStateOf(0f) }
+    var scaledRangeSnap    by remember { mutableFloatStateOf(1f) }
+
+    // 추세선 그리기 — 첫 번째 탭 앵커
+    var pendingTrendAnchor by remember { mutableStateOf<Pair<Int, Float>?>(null) }
+    LaunchedEffect(activeTool) {
+        if (activeTool != DrawingTool.TREND_LINE) pendingTrendAnchor = null
+    }
 
     // ── MA 값 사전 계산 (candles가 바뀔 때만 재계산) ──────────────────────────
     val maValues = remember(candles, config.movingAverages) {
@@ -197,7 +215,7 @@ fun CandleChart(
     Canvas(
         modifier = modifier
             .onSizeChanged { screenWidth = it.width.toFloat() - priceLabelWidthPx }
-            .pointerInput(candles.size) {
+            .pointerInput(candles.size, activeTool) {
                 coroutineScope {
                     // ① 스크롤 / 핀치줌
                     launch {
@@ -208,18 +226,76 @@ fun CandleChart(
                             offsetX = (offsetX + pan.x).coerceIn(minOffset, 0f)
                         }
                     }
-                    // ② 탭 — 패턴 뱃지 토글 / 크로스헤어 닫기
+                    // ② 탭
                     launch {
                         detectTapGestures(onTap = { tapOffset ->
-                            if (crosshairIndex != null) {
-                                crosshairIndex = null
-                                return@detectTapGestures
+                            when (activeTool) {
+                                DrawingTool.HORIZONTAL -> {
+                                    if (scaledRangeSnap > 0f) {
+                                        val price = minPriceSnap + (1f - tapOffset.y / chartHeightSnap) * scaledRangeSnap
+                                        onDrawingLineAdded(DrawingLine.Horizontal(System.currentTimeMillis(), price))
+                                    }
+                                }
+                                DrawingTool.TREND_LINE -> {
+                                    if (scaledRangeSnap > 0f) {
+                                        val idx   = ((tapOffset.x - offsetX) / candleWidthPx).toInt().coerceIn(0, candles.lastIndex)
+                                        val price = minPriceSnap + (1f - tapOffset.y / chartHeightSnap) * scaledRangeSnap
+                                        val existing = pendingTrendAnchor
+                                        if (existing == null) {
+                                            pendingTrendAnchor = Pair(idx, price)
+                                        } else {
+                                            onDrawingLineAdded(
+                                                DrawingLine.Trend(
+                                                    id     = System.currentTimeMillis(),
+                                                    index1 = existing.first,
+                                                    price1 = existing.second,
+                                                    index2 = idx,
+                                                    price2 = price,
+                                                )
+                                            )
+                                            pendingTrendAnchor = null
+                                        }
+                                    }
+                                }
+                                DrawingTool.NONE -> {
+                                    // 기존 라인 hit-test → 삭제 콜백
+                                    if (drawingLines.isNotEmpty() && scaledRangeSnap > 0f) {
+                                        val hitLine = drawingLines.firstOrNull { line ->
+                                            when (line) {
+                                                is DrawingLine.Horizontal -> {
+                                                    val lineY = chartHeightSnap * (1f - (line.price - minPriceSnap) / scaledRangeSnap)
+                                                    abs(tapOffset.y - lineY) < 12f
+                                                }
+                                                is DrawingLine.Trend -> {
+                                                    val x1 = offsetX + (line.index1 + 0.5f) * candleWidthPx
+                                                    val y1 = chartHeightSnap * (1f - (line.price1 - minPriceSnap) / scaledRangeSnap)
+                                                    val x2 = offsetX + (line.index2 + 0.5f) * candleWidthPx
+                                                    val y2 = chartHeightSnap * (1f - (line.price2 - minPriceSnap) / scaledRangeSnap)
+                                                    if (x1 == x2) false
+                                                    else {
+                                                        val lineYAtTapX = y1 + ((y2 - y1) / (x2 - x1)) * (tapOffset.x - x1)
+                                                        abs(tapOffset.y - lineYAtTapX) < 12f
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        if (hitLine != null) {
+                                            onDrawingLineRemoved(hitLine)
+                                            return@detectTapGestures
+                                        }
+                                    }
+                                    // 기존 로직: 크로스헤어 닫기 / 패턴 뱃지 토글
+                                    if (crosshairIndex != null) {
+                                        crosshairIndex = null
+                                        return@detectTapGestures
+                                    }
+                                    val idx = ((tapOffset.x - offsetX) / candleWidthPx)
+                                        .toInt().coerceIn(0, candles.lastIndex)
+                                    val hasPattern = patterns.any { it.index == idx }
+                                    tappedPatternIndex =
+                                        if (hasPattern && tappedPatternIndex != idx) idx else null
+                                }
                             }
-                            val idx = ((tapOffset.x - offsetX) / candleWidthPx)
-                                .toInt().coerceIn(0, candles.lastIndex)
-                            val hasPattern = patterns.any { it.index == idx }
-                            tappedPatternIndex =
-                                if (hasPattern && tappedPatternIndex != idx) idx else null
                         })
                     }
                     // ③ 크로스헤어 — 길게 누른 채 드래그
@@ -248,12 +324,6 @@ fun CandleChart(
         drawRect(config.backgroundColor)
         if (candles.isEmpty()) return@Canvas
 
-        // 레이아웃 영역 분할
-        //  size.height
-        //  ├── chartAreaHeight (= 캔들 + 거래량)
-        //  │     ├── chartHeight (캔들 영역)
-        //  │     └── volumeAreaHeight (거래량, showVolume=true 시)
-        //  └── timeAxisHeightPx (시간 축, showTimeAxis=true 시)
         val chartAreaHeight  = size.height - timeAxisHeightPx
         val chartHeight      = if (config.showVolume) chartAreaHeight * (1f - VOLUME_AREA_RATIO)
                                else chartAreaHeight
@@ -264,11 +334,10 @@ fun CandleChart(
             .coerceIn(firstIdx, candles.lastIndex)
         val visibleCandles = candles.subList(firstIdx, lastIdx + 1)
 
-        // 캔들 간격으로 분봉/일봉 자동 판별 — 시간축 포맷 & OHLCV 날짜 포맷 결정
         val avgCandleMs = if (lastIdx > firstIdx)
             (candles[lastIdx].timestamp - candles[firstIdx].timestamp) / (lastIdx - firstIdx).toLong()
         else Long.MAX_VALUE
-        val isIntraday = avgCandleMs < 24 * 60 * 60 * 1_000L  // 1일 미만 간격 = 분봉/시간봉
+        val isIntraday = avgCandleMs < 24 * 60 * 60 * 1_000L
 
         // ── ③ 가격 스케일 ────────────────────────────────────────────────────
         val rawMin      = visibleCandles.minOf { it.low }
@@ -279,6 +348,11 @@ fun CandleChart(
         val scaledRange = (rawMax + padding) - minPrice
 
         fun priceToY(price: Float) = chartHeight * (1f - (price - minPrice) / scaledRange)
+
+        // gesture 콜백에서 사용할 스냅 업데이트
+        chartHeightSnap = chartHeight
+        minPriceSnap    = minPrice
+        scaledRangeSnap = scaledRange
 
         // ── ④ 그리드 + 우측 가격 레이블 ──────────────────────────────────────
         if (config.showGrid) {
@@ -304,10 +378,10 @@ fun CandleChart(
             strokeWidth = 0.5f,
         )
 
-        // ── clipRect: 캔들 영역 — 가격 레이블 영역으로 넘치지 않도록 ──────────
+        // ── clipRect: 캔들 영역 ───────────────────────────────────────────────
         clipRect(0f, 0f, chartWidth, size.height) {
 
-            // ── ⑥ 패턴 구간 배경 (span 기반) ─────────────────────────────────
+            // ── ⑥ 패턴 구간 배경 ─────────────────────────────────────────────
             if (config.showPatternMarkers) {
                 for (result in patterns) {
                     val idx = result.index
@@ -348,7 +422,6 @@ fun CandleChart(
             }
 
             // ── ⑧ 이동 평균선 ────────────────────────────────────────────────
-            // firstIdx-1 까지 포함해 좌측 경계에서 선이 끊기지 않도록
             config.movingAverages.forEachIndexed { maIdx, maConfig ->
                 val values    = maValues.getOrNull(maIdx) ?: return@forEachIndexed
                 val path      = Path()
@@ -364,6 +437,44 @@ fun CandleChart(
                     path, color = maConfig.color,
                     style = Stroke(width = maConfig.strokeWidth, cap = StrokeCap.Round, join = StrokeJoin.Round),
                 )
+            }
+
+            // ── ⑧b 그리기 선 ─────────────────────────────────────────────────
+            for (line in drawingLines) {
+                when (line) {
+                    is DrawingLine.Horizontal -> {
+                        val y = priceToY(line.price)
+                        drawLine(
+                            color       = DRAWING_LINE_COLOR,
+                            start       = Offset(0f, y),
+                            end         = Offset(chartWidth, y),
+                            strokeWidth = 1.5f,
+                        )
+                    }
+                    is DrawingLine.Trend -> {
+                        val x1 = offsetX + (line.index1 + 0.5f) * candleWidthPx
+                        val y1 = priceToY(line.price1)
+                        val x2 = offsetX + (line.index2 + 0.5f) * candleWidthPx
+                        val y2 = priceToY(line.price2)
+                        if (x1 != x2) {
+                            val slope = (y2 - y1) / (x2 - x1)
+                            drawLine(
+                                color       = DRAWING_LINE_COLOR,
+                                start       = Offset(0f, y1 + slope * (0f - x1)),
+                                end         = Offset(chartWidth, y1 + slope * (chartWidth - x1)),
+                                strokeWidth = 1.5f,
+                            )
+                        }
+                    }
+                }
+            }
+
+            // 추세선 그리는 중 — 첫 앵커 점 시각화
+            pendingTrendAnchor?.let { (anchorIdx, anchorPrice) ->
+                val cx = offsetX + (anchorIdx + 0.5f) * candleWidthPx
+                val cy = priceToY(anchorPrice)
+                drawCircle(DRAWING_LINE_COLOR.copy(alpha = 0.3f), radius = 10f, center = Offset(cx, cy))
+                drawCircle(DRAWING_LINE_COLOR, radius = 5f, center = Offset(cx, cy))
             }
 
             // ── ⑨ 패턴 마커 (▲ ▼ ●) ─────────────────────────────────────────
@@ -462,17 +573,13 @@ fun CandleChart(
                 if (centerX < 0f || centerX > chartWidth) return@let
 
                 val dash = PathEffect.dashPathEffect(floatArrayOf(4f, 4f))
-
-                // 수직 점선 (캔들 + 거래량 영역 전체)
                 drawLine(
                     color = config.crosshairColor.copy(alpha = 0.8f),
                     start = Offset(centerX, 0f), end = Offset(centerX, chartAreaHeight),
                     strokeWidth = 1f, pathEffect = dash,
                 )
 
-                // OHLCV 인포바 (상단 좌측 고정)
                 val info = buildString {
-                    // 분봉이면 날짜+시간, 일봉 이상이면 날짜만
                     append(if (isIntraday) candle.timestamp.toDateTimeLabel() else candle.timestamp.toDateLabel())
                     append("  O ${candle.open.toLabel()}")
                     append("  H ${candle.high.toLabel()}")
@@ -511,8 +618,25 @@ fun CandleChart(
         }
         // ── clipRect 종료 ────────────────────────────────────────────────────
 
+        // ── ⑧c 수평 그리기 선 — 우측 가격 배지 (clipRect 바깥) ──────────────
+        for (line in drawingLines.filterIsInstance<DrawingLine.Horizontal>()) {
+            val y        = priceToY(line.price)
+            val label    = line.price.toLabel()
+            val measured = textMeasurer.measure(label, drawingBadgeStyle)
+            val badgeTop = y - measured.size.height / 2f - 2f
+            drawRect(
+                color   = DRAWING_LINE_COLOR,
+                topLeft = Offset(chartWidth + 1f, badgeTop),
+                size    = Size(priceLabelWidthPx - 2f, measured.size.height.toFloat() + 4f),
+            )
+            drawText(
+                textMeasurer, label,
+                Offset(chartWidth + 4f, y - measured.size.height / 2f),
+                drawingBadgeStyle,
+            )
+        }
+
         // ── ⑬ 크로스헤어 — 수평 점선 + 우측 가격 배지 ──────────────────────
-        // clipRect 바깥에서 그려 가격 레이블 영역(오른쪽 60dp)까지 선이 연장됨
         crosshairIndex?.let { idx ->
             val candle  = candles.getOrNull(idx) ?: return@let
             val centerX = offsetX + (idx + 0.5f) * candleWidthPx
@@ -521,16 +645,14 @@ fun CandleChart(
             val closeY = priceToY(candle.close)
             val dash   = PathEffect.dashPathEffect(floatArrayOf(4f, 4f))
 
-            // 수평 점선 (차트 전체 폭)
             drawLine(
                 color = config.crosshairColor.copy(alpha = 0.8f),
                 start = Offset(0f, closeY), end = Offset(size.width, closeY),
                 strokeWidth = 1f, pathEffect = dash,
             )
-            // 우측 가격 배지 — 현재 가격 하이라이트
-            val priceLabel   = candle.close.toLabel()
+            val priceLabel    = candle.close.toLabel()
             val priceMeasured = textMeasurer.measure(priceLabel, priceStyle)
-            val badgeTop     = closeY - priceMeasured.size.height / 2f - 2f
+            val badgeTop      = closeY - priceMeasured.size.height / 2f - 2f
             drawRect(
                 color = config.crosshairColor,
                 topLeft = Offset(chartWidth + 1f, badgeTop),
@@ -557,13 +679,11 @@ fun CandleChart(
             for (index in firstIdx..lastIdx step labelInterval) {
                 val x = offsetX + (index + 0.5f) * candleWidthPx
                 if (x < 0f || x > chartWidth) continue
-                // 분봉이면 HH:mm, 일봉 이상이면 MM/dd
                 val label    = if (isIntraday) candles[index].timestamp.toTimeLabel()
                                else candles[index].timestamp.toShortDateLabel()
                 val measured = textMeasurer.measure(label, timeAxisStyle)
                 val labelX   = (x - measured.size.width / 2f)
                     .coerceIn(0f, chartWidth - measured.size.width.toFloat())
-                // 겹치는 레이블 건너뜀
                 if (labelX > prevLabelRight + 4f) {
                     drawText(textMeasurer, label, Offset(labelX, axisTop + 3f), timeAxisStyle)
                     prevLabelRight = labelX + measured.size.width

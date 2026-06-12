@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -32,11 +33,15 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -47,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.hanto.kcandlekit.compose.CandleChart
+import com.hanto.kcandlekit.core.DrawingLine
 import com.hanto.kcandlekit.ui.theme.KCandleKitTheme
 
 class MainActivity : ComponentActivity() {
@@ -67,9 +73,12 @@ private val SURFACE = Color(0xFF1E2130)  // 컨트롤 영역
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChartScreen(vm: ChartViewModel = viewModel()) {
-    val uiState        by vm.uiState.collectAsState()
-    val selectedMarket by vm.selectedMarket.collectAsState()
+    val uiState          by vm.uiState.collectAsState()
+    val selectedMarket   by vm.selectedMarket.collectAsState()
     val selectedInterval by vm.selectedInterval.collectAsState()
+    val drawingLines     by vm.drawingLines.collectAsState()
+    val activeTool       by vm.activeTool.collectAsState()
+    var lineToDelete     by remember { mutableStateOf<DrawingLine?>(null) }
 
     Scaffold(
         topBar = {
@@ -95,6 +104,23 @@ fun ChartScreen(vm: ChartViewModel = viewModel()) {
         },
         containerColor = BG,
     ) { innerPadding ->
+        // 선 삭제 확인 다이얼로그
+        lineToDelete?.let { line ->
+            AlertDialog(
+                onDismissRequest = { lineToDelete = null },
+                title   = { Text("선 삭제") },
+                text    = { Text("이 선을 삭제할까요?") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        vm.removeDrawingLine(line)
+                        lineToDelete = null
+                    }) { Text("삭제", color = Color(0xFFEF5350)) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { lineToDelete = null }) { Text("취소") }
+                },
+            )
+        }
         Column(
             modifier = Modifier
                 .padding(innerPadding)
@@ -167,11 +193,24 @@ fun ChartScreen(vm: ChartViewModel = viewModel()) {
                     }
 
                     is ChartUiState.Success -> {
-                        CandleChart(
-                            candles  = state.candles,
-                            patterns = state.patterns,
-                            modifier = Modifier.fillMaxSize(),
-                        )
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            CandleChart(
+                                candles              = state.candles,
+                                patterns             = state.patterns,
+                                drawingLines         = drawingLines,
+                                activeTool           = activeTool,
+                                onDrawingLineAdded   = { vm.addDrawingLine(it) },
+                                onDrawingLineRemoved = { lineToDelete = it },
+                                modifier             = Modifier.fillMaxSize(),
+                            )
+                            DrawingFab(
+                                activeTool     = activeTool,
+                                onToolSelected = { vm.selectDrawingTool(it) },
+                                modifier       = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(8.dp),
+                            )
+                        }
                     }
                 }
             }

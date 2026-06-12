@@ -2,7 +2,9 @@ package com.hanto.kcandlekit
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.hanto.kcandlekit.compose.DrawingTool
 import com.hanto.kcandlekit.core.Candle
+import com.hanto.kcandlekit.core.DrawingLine
 import com.hanto.kcandlekit.core.PatternDetector
 import com.hanto.kcandlekit.core.PatternResult
 import com.hanto.kcandlekit.data.UpbitApi
@@ -68,6 +70,12 @@ class ChartViewModel : ViewModel() {
     private val _selectedInterval = MutableStateFlow(Interval.DAY)
     val selectedInterval: StateFlow<Interval> = _selectedInterval.asStateFlow()
 
+    private val _drawingLines = MutableStateFlow<List<DrawingLine>>(emptyList())
+    val drawingLines: StateFlow<List<DrawingLine>> = _drawingLines.asStateFlow()
+
+    private val _activeTool = MutableStateFlow(DrawingTool.NONE)
+    val activeTool: StateFlow<DrawingTool> = _activeTool.asStateFlow()
+
     private var wsJob: Job? = null
     private var liveHigh: Float = 0f
     private var liveLow: Float = Float.MAX_VALUE
@@ -89,12 +97,31 @@ class ChartViewModel : ViewModel() {
 
     fun reload() = load()
 
+    fun selectDrawingTool(tool: DrawingTool) {
+        _activeTool.value = if (_activeTool.value == tool) DrawingTool.NONE else tool
+    }
+
+    fun addDrawingLine(line: DrawingLine) {
+        _drawingLines.value = _drawingLines.value + line
+        if (line is DrawingLine.Trend) _activeTool.value = DrawingTool.NONE
+    }
+
+    fun removeDrawingLine(line: DrawingLine) {
+        _drawingLines.value = _drawingLines.value.filter { it.id != line.id }
+    }
+
+    fun clearAllDrawingLines() {
+        _drawingLines.value = emptyList()
+    }
+
     private fun load() {
         val market   = _selectedMarket.value
         val interval = _selectedInterval.value
 
         wsJob?.cancel()
         wsJob = null
+        _drawingLines.value = emptyList()
+        _activeTool.value = DrawingTool.NONE
 
         viewModelScope.launch {
             _uiState.value = ChartUiState.Loading
