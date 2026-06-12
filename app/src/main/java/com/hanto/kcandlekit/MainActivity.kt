@@ -89,7 +89,7 @@ fun ChartScreen(vm: ChartViewModel = viewModel(factory = ChartViewModelFactory()
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Text(
-                            text = "${selectedMarket.label} / KRW",
+                            text = "${selectedMarket.displayName} / KRW",
                             fontWeight = FontWeight.Bold,
                             fontSize = 16.sp,
                             color = Color.White,
@@ -136,7 +136,7 @@ fun ChartScreen(vm: ChartViewModel = viewModel(factory = ChartViewModelFactory()
             ) {
                 items(MARKETS) { market ->
                     MarketChip(
-                        label    = market.label,
+                        label    = market.displayName,
                         selected = selectedMarket == market,
                         onClick  = { vm.selectMarket(market) },
                     )
@@ -196,6 +196,7 @@ fun ChartScreen(vm: ChartViewModel = viewModel(factory = ChartViewModelFactory()
                         Box(modifier = Modifier.fillMaxSize()) {
                             CandleChart(
                                 candles              = state.candles,
+                                scrollResetKey       = "${selectedMarket.id}_${selectedInterval.name}",
                                 patterns             = state.patterns,
                                 drawingLines         = drawingLines,
                                 activeTool           = activeTool,

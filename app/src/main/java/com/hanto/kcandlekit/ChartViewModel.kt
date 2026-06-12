@@ -4,19 +4,22 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.hanto.kcandlekit.compose.DrawingTool
 import com.hanto.kcandlekit.core.Candle
+import com.hanto.kcandlekit.core.CandleIntervalSpec
+import com.hanto.kcandlekit.core.CandleRepository
+import com.hanto.kcandlekit.core.CandleUnit
 import com.hanto.kcandlekit.core.DrawingLine
+import com.hanto.kcandlekit.core.MarketSpec
 import com.hanto.kcandlekit.core.PatternDetector
 import com.hanto.kcandlekit.core.PatternResult
-import com.hanto.kcandlekit.data.CandleRepository
-import com.hanto.kcandlekit.data.TickerRepository
-import com.hanto.kcandlekit.data.TickerUpdate
+import com.hanto.kcandlekit.core.TickerRepository
+import com.hanto.kcandlekit.core.TickerUpdate
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -32,26 +35,24 @@ sealed interface ChartUiState {
     data class Error(val message: String) : ChartUiState
 }
 
-/** minuteUnit null이면 일/주/월봉, 숫자면 분봉 단위 */
-enum class Interval(val label: String, val minuteUnit: Int?, val count: Int) {
-    MINUTE_1 ("1분",   1,  200),
-    MINUTE_5 ("5분",   5,  200),
-    MINUTE_10("10분", 10,  200),
-    MINUTE_30("30분", 30,  200),
-    MINUTE_60("60분", 60,  200),
-    DAY      ("일봉", null, 200),
-    WEEK     ("주봉", null, 100),
-    MONTH    ("월봉", null,  60),
+/** UI 레이블 + CandleIntervalSpec 매핑. Upbit 특화 정보(label)만 여기에 존재. */
+enum class Interval(val label: String, val spec: CandleIntervalSpec) {
+    MINUTE_1 ("1분",  CandleIntervalSpec(CandleUnit.MINUTE, 1,  200)),
+    MINUTE_5 ("5분",  CandleIntervalSpec(CandleUnit.MINUTE, 5,  200)),
+    MINUTE_10("10분", CandleIntervalSpec(CandleUnit.MINUTE, 10, 200)),
+    MINUTE_30("30분", CandleIntervalSpec(CandleUnit.MINUTE, 30, 200)),
+    MINUTE_60("60분", CandleIntervalSpec(CandleUnit.MINUTE, 60, 200)),
+    DAY      ("일봉", CandleIntervalSpec(CandleUnit.DAY,    count = 200)),
+    WEEK     ("주봉", CandleIntervalSpec(CandleUnit.WEEK,   count = 100)),
+    MONTH    ("월봉", CandleIntervalSpec(CandleUnit.MONTH,  count = 60)),
 }
 
-data class Market(val code: String, val label: String)
-
 val MARKETS = listOf(
-    Market("KRW-BTC",  "BTC"),
-    Market("KRW-ETH",  "ETH"),
-    Market("KRW-XRP",  "XRP"),
-    Market("KRW-SOL",  "SOL"),
-    Market("KRW-DOGE", "DOGE"),
+    MarketSpec("KRW-BTC",  "BTC"),
+    MarketSpec("KRW-ETH",  "ETH"),
+    MarketSpec("KRW-XRP",  "XRP"),
+    MarketSpec("KRW-SOL",  "SOL"),
+    MarketSpec("KRW-DOGE", "DOGE"),
 )
 
 // ── ViewModel ─────────────────────────────────────────────────────────────────
@@ -65,7 +66,7 @@ class ChartViewModel(
     val uiState: StateFlow<ChartUiState> = _uiState.asStateFlow()
 
     private val _selectedMarket   = MutableStateFlow(MARKETS.first())
-    val selectedMarket: StateFlow<Market> = _selectedMarket.asStateFlow()
+    val selectedMarket: StateFlow<MarketSpec> = _selectedMarket.asStateFlow()
 
     private val _selectedInterval = MutableStateFlow(Interval.DAY)
     val selectedInterval: StateFlow<Interval> = _selectedInterval.asStateFlow()
@@ -80,10 +81,11 @@ class ChartViewModel(
     private var liveHigh: Float = 0f
     private var liveLow: Float = Float.MAX_VALUE
     private var currentPeriodStart: Long = 0L
+    private var lastTickUpdateMs: Long = 0L
 
     init { load() }
 
-    fun selectMarket(market: Market) {
+    fun selectMarket(market: MarketSpec) {
         if (_selectedMarket.value == market) return
         _selectedMarket.value = market
         load()
@@ -114,30 +116,38 @@ class ChartViewModel(
         _drawingLines.value = emptyList()
     }
 
-    private fun load() {
+    private fun load(seamless: Boolean = false) {
         val market   = _selectedMarket.value
         val interval = _selectedInterval.value
 
         wsJob?.cancel()
         wsJob = null
-        _drawingLines.value = emptyList()
-        _activeTool.value = DrawingTool.NONE
+        // 봉 경계 갱신(seamless)이면 그리기 선 유지; 마켓/인터벌 변경 시엔 초기화
+        if (!seamless) {
+            _drawingLines.value = emptyList()
+            _activeTool.value = DrawingTool.NONE
+        }
 
         viewModelScope.launch {
-            _uiState.value = ChartUiState.Loading
+            if (!seamless) {
+                _uiState.value = ChartUiState.Loading
+            } else {
+                val cur = _uiState.value
+                if (cur is ChartUiState.Success) _uiState.value = cur.copy(isLive = false)
+            }
             runCatching {
-                candleRepo.getCandles(market, interval)
+                candleRepo.getCandles(market, interval.spec)
             }.onSuccess { candles ->
                 val patterns = PatternDetector.detect(candles)
                 _uiState.value = ChartUiState.Success(candles, patterns)
 
                 // 분봉에만 WebSocket 연결 (일/주/월봉은 실시간 틱 의미 없음)
-                if (interval.minuteUnit != null) {
+                if (interval.spec.unit == CandleUnit.MINUTE) {
                     val last = candles.lastOrNull()
                     if (last != null) {
                         liveHigh = last.high
                         liveLow  = last.low
-                        currentPeriodStart = periodStartOf(last.timestamp, interval)
+                        currentPeriodStart = periodStartOf(last.timestamp, interval.spec)
                         startWebSocket(market, interval)
                     }
                 }
@@ -147,14 +157,22 @@ class ChartViewModel(
         }
     }
 
-    private fun startWebSocket(market: Market, interval: Interval) {
+    private fun startWebSocket(market: MarketSpec, interval: Interval) {
         wsJob = viewModelScope.launch {
             var backoffMs = 1_000L
             while (isActive) {
                 try {
-                    tickerRepo.tickerFlow(market)
-                        .collect { processTick(it, interval) }
-                    backoffMs = 1_000L  // 정상 종료 시 백오프 초기화
+                    var hitBoundary = false
+                    tickerRepo.priceFlow(market)
+                        .takeWhile { tick ->
+                            val isBoundary = periodStartOf(tick.timestamp, interval.spec) > currentPeriodStart
+                            if (isBoundary) hitBoundary = true
+                            !isBoundary
+                        }
+                        .collect { tick -> processTick(tick) }
+                    backoffMs = 1_000L
+                    // 봉 경계 감지 시 collect 종료 후 load() 호출 — 이중 구독 방지
+                    if (hitBoundary) { load(seamless = true); return@launch }
                 } catch (e: CancellationException) {
                     throw e  // 구조적 동시성 유지
                 } catch (e: Exception) {
@@ -171,37 +189,35 @@ class ChartViewModel(
         }
     }
 
-    private fun processTick(tick: TickerUpdate, interval: Interval) {
-        // 봉 경계를 넘으면 REST 재조회로 깔끔한 데이터 확보
-        if (periodStartOf(tick.tradeTimestamp, interval) > currentPeriodStart) {
-            viewModelScope.launch(Dispatchers.Main.immediate) { load() }
-            return
-        }
+    private fun processTick(tick: TickerUpdate) {
+        val newClose = tick.price.toFloat()
 
-        val current = _uiState.value as? ChartUiState.Success ?: return
-        val last    = current.candles.lastOrNull() ?: return
-        val newClose = tick.tradePrice.toFloat()
-
-        // 현재 봉의 고저를 틱 스트림에서 직접 추적
+        // 고저는 매 틱 추적 (UI 업데이트 throttle과 무관하게 누락 없이 갱신)
         if (newClose > liveHigh) liveHigh = newClose
         if (newClose < liveLow)  liveLow  = newClose
 
+        // UI 상태는 100ms에 1회로 제한 — 초당 수십 회 틱에 의한 리컴포지션 방지
+        val now = System.currentTimeMillis()
+        if (now - lastTickUpdateMs < 100L) return
+        lastTickUpdateMs = now
+
+        val current = _uiState.value as? ChartUiState.Success ?: return
+        val last    = current.candles.lastOrNull() ?: return
         val updatedLast = last.copy(
             close = newClose,
-            high  = maxOf(last.high, liveHigh),
-            low   = minOf(last.low,  liveLow),
+            high  = liveHigh,
+            low   = liveLow,
         )
         val updatedCandles = current.candles.toMutableList()
             .also { it[it.lastIndex] = updatedLast }
-
-        // 패턴은 봉이 확정될 때만 재계산 (REST 재조회 시) — 매 틱마다 실행 안 함
         _uiState.value = current.copy(candles = updatedCandles, isLive = true)
     }
 
     // tradeTimestamp가 속한 봉 기간의 시작 시각(Unix ms) 반환
-    private fun periodStartOf(tradeTimestamp: Long, interval: Interval): Long {
-        val periodMs = (interval.minuteUnit ?: return Long.MIN_VALUE) * 60 * 1_000L
-        return (tradeTimestamp / periodMs) * periodMs
+    private fun periodStartOf(timestamp: Long, spec: CandleIntervalSpec): Long {
+        if (spec.unit != CandleUnit.MINUTE) return Long.MIN_VALUE
+        val periodMs = spec.minuteValue * 60 * 1_000L
+        return (timestamp / periodMs) * periodMs
     }
 
     override fun onCleared() {

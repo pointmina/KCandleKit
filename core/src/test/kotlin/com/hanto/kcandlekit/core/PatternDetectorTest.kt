@@ -127,11 +127,11 @@ class PatternDetectorTest {
     }
 
     @Test
-    fun `hammer strength is STRONG`() {
+    fun `hammer strength is NORMAL`() {
         val hammer = candle(open = 100f, high = 102.1f, low = 90.2f, close = 102f)
         val patterns = PatternDetector.detect(downtrendContext() + hammer)
         val result = patterns.first { it.pattern == CandlePattern.HAMMER }
-        assertTrue(result.strength == SignalStrength.STRONG)
+        assertTrue(result.strength == SignalStrength.NORMAL)
     }
 
     @Test
@@ -151,11 +151,11 @@ class PatternDetectorTest {
     }
 
     @Test
-    fun `shooting star strength is STRONG`() {
+    fun `shooting star strength is NORMAL`() {
         val shootingStar = candle(open = 110f, high = 120f, low = 107.8f, close = 108f)
         val patterns = PatternDetector.detect(uptrendContext() + shootingStar)
         val result = patterns.first { it.pattern == CandlePattern.SHOOTING_STAR }
-        assertTrue(result.strength == SignalStrength.STRONG)
+        assertTrue(result.strength == SignalStrength.NORMAL)
     }
 
     // --- 불리시 엔걸핑 ---
