@@ -7,6 +7,8 @@ Plug in any exchange or securities API — the chart and pattern engine are full
 
 ---
 
+<img width="324" height="675" alt="image" src="https://github.com/user-attachments/assets/accc48b2-6c47-4dac-abcc-3fad75155a12" />
+
 ## Features
 
 - **Candlestick chart** rendered on Compose Canvas with pinch-zoom and horizontal scroll
