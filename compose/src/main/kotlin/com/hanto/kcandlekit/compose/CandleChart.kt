@@ -10,6 +10,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -163,6 +164,7 @@ private fun DrawScope.drawLabelBadge(
 @Composable
 fun CandleChart(
     candles: List<Candle>,
+    scrollResetKey: Any = Unit,
     patterns: List<PatternResult> = emptyList(),
     drawingLines: List<DrawingLine> = emptyList(),
     activeTool: DrawingTool = DrawingTool.NONE,
@@ -206,14 +208,19 @@ fun CandleChart(
     var candleWidthPx      by remember { mutableFloatStateOf(DEFAULT_CANDLE_WIDTH) }
     var offsetX            by remember { mutableFloatStateOf(0f) }
     var screenWidth        by remember { mutableFloatStateOf(0f) }
-    var scrollInitialized  by remember(candles) { mutableStateOf(false) }
+    var scrollInitialized  by remember(scrollResetKey) { mutableStateOf(false) }
     var tappedPatternIndex by remember { mutableStateOf<Int?>(null) }
     var crosshairIndex     by remember { mutableStateOf<Int?>(null) }
 
     // 가격 스케일 스냅 — gesture 콜백에서 price ↔ Y 변환에 사용
-    var chartHeightSnap    by remember { mutableFloatStateOf(0f) }
-    var minPriceSnap       by remember { mutableFloatStateOf(0f) }
-    var scaledRangeSnap    by remember { mutableFloatStateOf(1f) }
+    // FloatArray holder: DrawScope 내 write가 state change를 유발하지 않도록 함
+    val chartScale = remember { FloatArray(3).also { it[2] = 1f } }
+    // [0]=chartHeight  [1]=minPrice  [2]=scaledRange (초기 scaledRange=1f)
+
+    // 제스처 람다가 항상 최신 파라미터를 참조하도록 — pointerInput 재시작 없이 최신 값 유지
+    val latestCandles      by rememberUpdatedState(candles)
+    val latestPatterns     by rememberUpdatedState(patterns)
+    val latestDrawingLines by rememberUpdatedState(drawingLines)
 
     // 추세선 그리기 — 첫 번째 탭 앵커
     var pendingTrendAnchor by remember { mutableStateOf<Pair<Int, Float>?>(null) }
@@ -238,13 +245,13 @@ fun CandleChart(
     Canvas(
         modifier = modifier
             .onSizeChanged { screenWidth = it.width.toFloat() - priceLabelWidthPx }
-            .pointerInput(candles.size, activeTool) {
+            .pointerInput(activeTool) {
                 coroutineScope {
                     // ① 스크롤 / 핀치줌
                     launch {
                         detectTransformGestures { _, pan, zoom, _ ->
                             candleWidthPx = (candleWidthPx * zoom).coerceIn(MIN_CANDLE_WIDTH, MAX_CANDLE_WIDTH)
-                            val totalWidth = candles.size * candleWidthPx
+                            val totalWidth = latestCandles.size * candleWidthPx
                             val minOffset  = minOf(0f, screenWidth - totalWidth)
                             offsetX = (offsetX + pan.x).coerceIn(minOffset, 0f)
                         }
@@ -252,24 +259,27 @@ fun CandleChart(
                     // ② 탭
                     launch {
                         detectTapGestures(onTap = { tapOffset ->
+                            val chartHeight = chartScale[0]
+                            val minPrice    = chartScale[1]
+                            val scaledRange = chartScale[2]
                             when (activeTool) {
                                 DrawingTool.HORIZONTAL -> {
-                                    if (scaledRangeSnap > 0f) {
-                                        val price = minPriceSnap + (1f - tapOffset.y / chartHeightSnap) * scaledRangeSnap
-                                        onDrawingLineAdded(DrawingLine.Horizontal(System.currentTimeMillis(), price))
+                                    if (scaledRange > 0f && chartHeight > 0f) {
+                                        val price = minPrice + (1f - tapOffset.y / chartHeight) * scaledRange
+                                        onDrawingLineAdded(DrawingLine.Horizontal(System.nanoTime(), price))
                                     }
                                 }
                                 DrawingTool.TREND_LINE -> {
-                                    if (scaledRangeSnap > 0f) {
-                                        val idx   = ((tapOffset.x - offsetX) / candleWidthPx).toInt().coerceIn(0, candles.lastIndex)
-                                        val price = minPriceSnap + (1f - tapOffset.y / chartHeightSnap) * scaledRangeSnap
+                                    if (scaledRange > 0f && chartHeight > 0f) {
+                                        val idx   = ((tapOffset.x - offsetX) / candleWidthPx).toInt().coerceIn(0, latestCandles.lastIndex)
+                                        val price = minPrice + (1f - tapOffset.y / chartHeight) * scaledRange
                                         val existing = pendingTrendAnchor
                                         if (existing == null) {
                                             pendingTrendAnchor = Pair(idx, price)
                                         } else {
                                             onDrawingLineAdded(
                                                 DrawingLine.Trend(
-                                                    id     = System.currentTimeMillis(),
+                                                    id     = System.nanoTime(),
                                                     index1 = existing.first,
                                                     price1 = existing.second,
                                                     index2 = idx,
@@ -282,18 +292,18 @@ fun CandleChart(
                                 }
                                 DrawingTool.NONE -> {
                                     // 기존 라인 hit-test → 삭제 콜백
-                                    if (drawingLines.isNotEmpty() && scaledRangeSnap > 0f) {
-                                        val hitLine = drawingLines.firstOrNull { line ->
+                                    if (latestDrawingLines.isNotEmpty() && scaledRange > 0f && chartHeight > 0f) {
+                                        val hitLine = latestDrawingLines.firstOrNull { line ->
                                             when (line) {
                                                 is DrawingLine.Horizontal -> {
-                                                    val lineY = chartHeightSnap * (1f - (line.price - minPriceSnap) / scaledRangeSnap)
+                                                    val lineY = chartHeight * (1f - (line.price - minPrice) / scaledRange)
                                                     abs(tapOffset.y - lineY) < 12f
                                                 }
                                                 is DrawingLine.Trend -> {
                                                     val x1 = offsetX + (line.index1 + 0.5f) * candleWidthPx
-                                                    val y1 = chartHeightSnap * (1f - (line.price1 - minPriceSnap) / scaledRangeSnap)
+                                                    val y1 = chartHeight * (1f - (line.price1 - minPrice) / scaledRange)
                                                     val x2 = offsetX + (line.index2 + 0.5f) * candleWidthPx
-                                                    val y2 = chartHeightSnap * (1f - (line.price2 - minPriceSnap) / scaledRangeSnap)
+                                                    val y2 = chartHeight * (1f - (line.price2 - minPrice) / scaledRange)
                                                     if (x1 == x2) false
                                                     else {
                                                         val lineYAtTapX = y1 + ((y2 - y1) / (x2 - x1)) * (tapOffset.x - x1)
@@ -313,8 +323,8 @@ fun CandleChart(
                                         return@detectTapGestures
                                     }
                                     val idx = ((tapOffset.x - offsetX) / candleWidthPx)
-                                        .toInt().coerceIn(0, candles.lastIndex)
-                                    val hasPattern = patterns.any { it.index == idx }
+                                        .toInt().coerceIn(0, latestCandles.lastIndex)
+                                    val hasPattern = latestPatterns.any { it.index == idx }
                                     tappedPatternIndex =
                                         if (hasPattern && tappedPatternIndex != idx) idx else null
                                 }
@@ -328,11 +338,11 @@ fun CandleChart(
                             onDragStart = { offset ->
                                 tappedPatternIndex = null
                                 crosshairIndex = ((offset.x - offsetX) / candleWidthPx)
-                                    .toInt().coerceIn(0, candles.lastIndex)
+                                    .toInt().coerceIn(0, latestCandles.lastIndex)
                             },
                             onDrag = { change, _ ->
                                 crosshairIndex = ((change.position.x - offsetX) / candleWidthPx)
-                                    .toInt().coerceIn(0, candles.lastIndex)
+                                    .toInt().coerceIn(0, latestCandles.lastIndex)
                             },
                             onDragEnd    = { crosshairIndex = null },
                             onDragCancel = { crosshairIndex = null },
@@ -372,10 +382,10 @@ fun CandleChart(
 
         fun priceToY(price: Float) = chartHeight * (1f - (price - minPrice) / scaledRange)
 
-        // gesture 콜백에서 사용할 스냅 업데이트
-        chartHeightSnap = chartHeight
-        minPriceSnap    = minPrice
-        scaledRangeSnap = scaledRange
+        // gesture 콜백에서 사용할 스케일 스냅 — FloatArray write는 state change 미유발
+        chartScale[0] = chartHeight
+        chartScale[1] = minPrice
+        chartScale[2] = scaledRange
 
         // ── ④ 그리드 + 우측 가격 레이블 ──────────────────────────────────────
         if (config.showGrid) {
@@ -663,7 +673,7 @@ fun CandleChart(
             if (config.showVolume) {
                 drawLine(color = config.gridColor, start = Offset(0f, chartHeight), end = Offset(chartWidth, chartHeight), strokeWidth = 1f)
                 val volumeAreaHeight = chartAreaHeight * VOLUME_AREA_RATIO
-                val maxVolume        = candles.maxOf { it.volume }.toFloat().coerceAtLeast(1f)
+                val maxVolume        = visibleCandles.maxOf { it.volume }.toFloat().coerceAtLeast(1f)
                 for (index in firstIdx..lastIdx) {
                     val candle       = candles[index]
                     val centerX      = offsetX + (index + 0.5f) * candleWidthPx

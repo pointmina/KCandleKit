@@ -1,13 +1,9 @@
 package com.hanto.kcandlekit.core
 
 private fun strengthOf(pattern: CandlePattern) = when (pattern) {
-    CandlePattern.BULLISH_ENGULFING,
     CandlePattern.MORNING_STAR,
-    CandlePattern.BEARISH_ENGULFING,
     CandlePattern.EVENING_STAR,
-    CandlePattern.HAMMER,
     CandlePattern.THREE_WHITE_SOLDIERS,
-    CandlePattern.SHOOTING_STAR,
     CandlePattern.THREE_BLACK_CROWS -> SignalStrength.STRONG
     else                            -> SignalStrength.NORMAL
 }
@@ -217,34 +213,23 @@ object PatternDetector {
         return isUptrend(candles, index - 2)
     }
 
-    // SMA20 기반 하락 추세 판정 — 이중 조건: 가격 위치 + SMA 기울기
-    // 구 방식(5봉 분할 평균)은 단봉 급등락에 추세 방향이 즉시 뒤집히는 문제가 있었음
-    private fun isDowntrend(candles: List<Candle>, index: Int): Boolean {
+    // SMA20 기반 추세 판정 — 이중 조건: 가격 위치 + SMA 기울기
+    // bullish=true → 상승 추세, bullish=false → 하락 추세
+    private fun isTrend(candles: List<Candle>, index: Int, bullish: Boolean): Boolean {
         if (index < TREND_LOOKBACK) return false
         val sma = candles.subList(index - TREND_LOOKBACK + 1, index + 1)
             .map { it.close.toDouble() }.average()
-        if (candles[index].close >= sma) return false   // 가격이 SMA 아래에 있어야 함
-        // SMA 기울기 확인: 현재 SMA < 과거 SMA (하락하는 추세선)
+        if (bullish) { if (candles[index].close <= sma) return false }
+        else         { if (candles[index].close >= sma) return false }
         if (index >= TREND_LOOKBACK + TREND_SLOPE_OFFSET) {
             val smaPrev = candles
                 .subList(index - TREND_LOOKBACK - TREND_SLOPE_OFFSET, index - TREND_SLOPE_OFFSET)
                 .map { it.close.toDouble() }.average()
-            return sma < smaPrev
-        }
-        return true  // 기울기 계산 데이터 부족 시 가격 위치만으로 판정
-    }
-
-    private fun isUptrend(candles: List<Candle>, index: Int): Boolean {
-        if (index < TREND_LOOKBACK) return false
-        val sma = candles.subList(index - TREND_LOOKBACK + 1, index + 1)
-            .map { it.close.toDouble() }.average()
-        if (candles[index].close <= sma) return false
-        if (index >= TREND_LOOKBACK + TREND_SLOPE_OFFSET) {
-            val smaPrev = candles
-                .subList(index - TREND_LOOKBACK - TREND_SLOPE_OFFSET, index - TREND_SLOPE_OFFSET)
-                .map { it.close.toDouble() }.average()
-            return sma > smaPrev
+            return if (bullish) sma > smaPrev else sma < smaPrev
         }
         return true
     }
+
+    private fun isUptrend(candles: List<Candle>, index: Int)   = isTrend(candles, index, bullish = true)
+    private fun isDowntrend(candles: List<Candle>, index: Int) = isTrend(candles, index, bullish = false)
 }

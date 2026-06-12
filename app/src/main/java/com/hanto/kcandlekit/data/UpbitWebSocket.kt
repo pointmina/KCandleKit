@@ -1,8 +1,10 @@
 package com.hanto.kcandlekit.data
 
 import com.google.gson.Gson
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.callbackFlow
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -46,4 +48,4 @@ fun upbitTickerFlow(client: OkHttpClient, market: String): Flow<UpbitTickerMessa
             }
         )
         awaitClose { ws.close(1000, "cancelled") }
-    }
+    }.buffer(Channel.UNLIMITED)
