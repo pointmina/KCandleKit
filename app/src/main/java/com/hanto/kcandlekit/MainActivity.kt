@@ -4,6 +4,11 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,8 +20,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -32,6 +39,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -66,12 +75,20 @@ fun ChartScreen(vm: ChartViewModel = viewModel()) {
         topBar = {
             TopAppBar(
                 title = {
-                    Text(
-                        text = "${selectedMarket.label} / KRW",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp,
-                        color = Color.White,
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            text = "${selectedMarket.label} / KRW",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp,
+                            color = Color.White,
+                        )
+                        if ((uiState as? ChartUiState.Success)?.isLive == true) {
+                            LiveDot()
+                        }
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = SURFACE),
             )
@@ -163,6 +180,28 @@ fun ChartScreen(vm: ChartViewModel = viewModel()) {
 }
 
 // ── 컴포넌트 ──────────────────────────────────────────────────────────────────
+
+@Composable
+private fun LiveDot() {
+    val infiniteTransition = rememberInfiniteTransition(label = "live")
+    val scale by infiniteTransition.animateFloat(
+        initialValue = 0.7f,
+        targetValue  = 1.3f,
+        animationSpec = infiniteRepeatable(
+            animation  = tween(durationMillis = 800),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "live_scale",
+    )
+    Box(
+        modifier = Modifier
+            .size(8.dp)
+            .scale(scale)
+            .clip(CircleShape)
+            .background(Color(0xFF26A69A)),
+    )
+}
+
 
 @Composable
 private fun MarketChip(label: String, selected: Boolean, onClick: () -> Unit) {

@@ -32,8 +32,8 @@ interface UpbitApiService {
 }
 
 object UpbitApi {
-    val service: UpbitApiService by lazy {
-        val client = OkHttpClient.Builder()
+    val client: OkHttpClient by lazy {
+        OkHttpClient.Builder()
             .addInterceptor { chain ->
                 val req = chain.request().newBuilder()
                     .addHeader("Accept", "application/json")
@@ -41,7 +41,9 @@ object UpbitApi {
                 chain.proceed(req)
             }
             .build()
+    }
 
+    val service: UpbitApiService by lazy {
         Retrofit.Builder()
             .baseUrl("https://api.upbit.com/v1/")
             .client(client)
