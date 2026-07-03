@@ -111,7 +111,31 @@ CandleChart(
 
 ## Connecting Your Exchange API
 
-Implement two interfaces from `core` and pass them to your ViewModel.
+`core` has no dependency on any specific exchange — `CandleChart` and `PatternDetector` only ever
+see `List<Candle>`. To prove it, here's a complete, runnable example with **no network calls and
+no exchange SDK at all**:
+
+```kotlin
+class FakeCandleRepository : CandleRepository {
+    override suspend fun getCandles(market: MarketSpec, interval: CandleIntervalSpec): List<Candle> {
+        var price = 100f
+        return List(interval.count) { i ->
+            val open = price
+            val close = open + (-2..2).random()
+            price = close
+            Candle(
+                timestamp = i * 60_000L,
+                open = open, close = close,
+                high = maxOf(open, close) + 1, low = minOf(open, close) - 1,
+                volume = (1..100).random().toLong(),
+            )
+        }
+    }
+}
+```
+
+Swap `FakeCandleRepository` for a real one by implementing the same two interfaces against any
+exchange or securities API:
 
 ```kotlin
 // 1. Implement CandleRepository
