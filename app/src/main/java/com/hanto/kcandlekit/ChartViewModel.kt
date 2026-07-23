@@ -59,7 +59,7 @@ val MARKETS = listOf(
 
 class ChartViewModel(
     private val candleRepo: CandleRepository,
-    private val tickerRepo: TickerRepository,
+    private val tickerRepo: TickerRepository? = null,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<ChartUiState>(ChartUiState.Loading)
@@ -141,8 +141,8 @@ class ChartViewModel(
                 val patterns = PatternDetector.detect(candles)
                 _uiState.value = ChartUiState.Success(candles, patterns)
 
-                // 분봉에만 WebSocket 연결 (일/주/월봉은 실시간 틱 의미 없음)
-                if (interval.spec.unit == CandleUnit.MINUTE) {
+                // 분봉 + tickerRepo가 있을 때만 WebSocket 연결 (일/주/월봉은 실시간 틱 의미 없음)
+                if (tickerRepo != null && interval.spec.unit == CandleUnit.MINUTE) {
                     val last = candles.lastOrNull()
                     if (last != null) {
                         liveHigh = last.high
@@ -158,12 +158,13 @@ class ChartViewModel(
     }
 
     private fun startWebSocket(market: MarketSpec, interval: Interval) {
+        val ticker = tickerRepo ?: return
         wsJob = viewModelScope.launch {
             var backoffMs = 1_000L
             while (isActive) {
                 try {
                     var hitBoundary = false
-                    tickerRepo.priceFlow(market)
+                    ticker.priceFlow(market)
                         .takeWhile { tick ->
                             val isBoundary = periodStartOf(tick.timestamp, interval.spec) > currentPeriodStart
                             if (isBoundary) hitBoundary = true
